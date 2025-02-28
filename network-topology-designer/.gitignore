@@ -1,0 +1,25 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+virtualenv/
+*.pyc
+__pycache__/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build files
+*.egg-info/
+dist/
+build/
+
+# Other common exclusions
+.DS_Store
+.env
+.coverage
+htmlcov/
