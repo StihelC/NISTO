@@ -1,22 +1,47 @@
 # Update imports
-from PyQt5.QtWidgets import QMainWindow, QFileDialog
-from PyQt5 import QtWidgets
-from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (
+    QMainWindow, 
+    QGraphicsView, 
+    QGraphicsScene, 
+    QAction, 
+    QToolBar,
+    QMessageBox,
+    QFileDialog,
+    QGraphicsRectItem
+)
+from PyQt5.QtGui import QIcon, QPainter, QPen, QColor
+from PyQt5.QtCore import Qt, QPointF
 from ui.network_topo import Ui_MainWindow
-from controllers.canvas_controller import CanvasController
+from .canvas_controller import CanvasController
 
 class MainWindow(QMainWindow):
     def __init__(self):
-        super(MainWindow, self).__init__()
+        super().__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         
         # Initialize the graphics scene
-        self.scene = QtWidgets.QGraphicsScene()
+        self.scene = QGraphicsScene()
         self.ui.graphicsView.setScene(self.scene)
         
+        # Add this to ensure the view displays content properly:
+        self.ui.graphicsView.setRenderHint(QPainter.Antialiasing)
+        self.ui.graphicsView.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.ui.graphicsView.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.ui.graphicsView.setDragMode(QGraphicsView.RubberBandDrag)
+        self.ui.graphicsView.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.ui.graphicsView.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        
+        # Add this to your MainWindow initialization
+        border_rect = QGraphicsRectItem(-500, -500, 1000, 1000)
+        border_rect.setPen(QPen(Qt.gray, 1, Qt.DashLine))
+        self.scene.addItem(border_rect)
+        
+        # Add a grid to the scene for better visibility
+        self.add_grid_to_scene()
+        
         # Initialize canvas controller
-        self.canvas = CanvasController(self.scene, self.ui.graphicsView)
+        self.canvas = CanvasController(self.ui.graphicsView)
         
         # Connect signals to slots
         self.setup_connections()
@@ -123,3 +148,24 @@ class MainWindow(QMainWindow):
                 print(f"Exporting as PNG to {filename}")
         except Exception as e:
             print(f"Error exporting as PNG: {e}")
+    
+    def add_grid_to_scene(self):
+        """Add a background grid to the scene for better visualization."""
+        grid_size = 50
+        grid_color = QColor(230, 230, 230)
+        
+        # Draw vertical lines
+        for x in range(-1000, 1000, grid_size):
+            line = self.scene.addLine(x, -1000, x, 1000, QPen(grid_color))
+            line.setZValue(-1)  # Put grid behind other items
+        
+        # Draw horizontal lines
+        for y in range(-1000, 1000, grid_size):
+            line = self.scene.addLine(-1000, y, 1000, y, QPen(grid_color))
+            line.setZValue(-1)  # Put grid behind other items
+        
+        # Add coordinate axis
+        x_axis = self.scene.addLine(-1000, 0, 1000, 0, QPen(Qt.red, 1))
+        y_axis = self.scene.addLine(0, -1000, 0, 1000, QPen(Qt.green, 1))
+        x_axis.setZValue(-0.5)
+        y_axis.setZValue(-0.5)
