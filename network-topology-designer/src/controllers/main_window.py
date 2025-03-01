@@ -46,6 +46,33 @@ class MainWindow(QMainWindow):
         # Connect signals to slots
         self.setup_connections()
         
+        # Set up the QGraphicsView properly for item manipulation
+        self.ui.graphicsView.setRenderHint(QPainter.Antialiasing)
+        self.ui.graphicsView.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        # This is important - allows tools like selection and drag to work
+        # Use RubberBandDrag when nothing is selected, NoDrag when we're manipulating items
+        self.ui.graphicsView.setDragMode(QGraphicsView.RubberBandDrag)
+        
+        # These settings help with proper transformation during zoom/pan
+        self.ui.graphicsView.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.ui.graphicsView.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+        
+        # Very important - this allows interactive items to receive mouse events directly
+        self.ui.graphicsView.setInteractive(True)
+        
+    def setup_ui(self):
+        # ... existing code ...
+        
+        # Add view control actions to toolbar
+        self.zoom_in_action = self.toolbar.addAction("Zoom In")
+        self.zoom_out_action = self.toolbar.addAction("Zoom Out")
+        self.reset_view_action = self.toolbar.addAction("Reset View")
+        
+        # Add a selection mode button to your toolbar in MainWindow.setup_ui
+        self.select_action = self.toolbar.addAction("Select")
+        self.select_action.triggered.connect(lambda: self.set_canvas_interaction_mode("select"))
+
     def setup_connections(self):
         """Connect UI signals to their corresponding slots."""
         
@@ -92,7 +119,34 @@ class MainWindow(QMainWindow):
         self.original_mouse_press_event = self.ui.graphicsView.mousePressEvent
         self.ui.graphicsView.mousePressEvent = self.handle_mouse_press
         print("Connected mousePressEvent")
+
+        self.connect_actions()
     
+    def connect_actions(self):
+        """Connect menu actions to their handlers"""
+        print("Available UI actions:", [attr for attr in dir(self.ui) if attr.startswith('action')])
+        try:
+            # First check if actions exist before trying to connect them
+            
+            # File menu actions
+            if hasattr(self.ui, 'actionSave'):
+                self.ui.actionSave.triggered.connect(self.save_topology)
+            if hasattr(self.ui, 'actionLoad'):
+                self.ui.actionLoad.triggered.connect(self.load_topology)
+            if hasattr(self.ui, 'actionSave_as_PNG'):
+                self.ui.actionSave_as_PNG.triggered.connect(self.export_as_png)
+                
+            # View menu actions - use the actions from your UI file
+        
+            # With these (assuming your action names in your UI file):
+            if hasattr(self.ui, 'actionZoom_In'):
+                self.ui.actionZoom_In.triggered.connect(self.zoom_in)
+            if hasattr(self.ui, 'actionZoom_Out'):
+                self.ui.actionZoom_Out.triggered.connect(self.zoom_out)
+                
+        except Exception as e:
+            print(f"Error connecting actions: {e}")
+
     def set_device_mode(self, device_type):
         """Set mode to add a specific device type."""
         self.canvas.set_mode("add_device")
@@ -169,3 +223,35 @@ class MainWindow(QMainWindow):
         y_axis = self.scene.addLine(0, -1000, 0, 1000, QPen(Qt.green, 1))
         x_axis.setZValue(-0.5)
         y_axis.setZValue(-0.5)
+
+    def zoom_in(self):
+        """Zoom in the view."""
+        self.ui.graphicsView.scale(1.2, 1.2)
+
+    def zoom_out(self):
+        """Zoom out the view."""
+        self.ui.graphicsView.scale(1/1.2, 1/1.2)
+
+    def reset_view(self):
+        """Reset the view to default."""
+        self.canvas.reset_view()
+
+    # Add this method to toggle between different selection/interaction modes
+    def set_canvas_interaction_mode(self, mode):
+        """Set the canvas interaction mode."""
+        if mode == "select":
+            # Enable selection and dragging of items
+            self.ui.graphicsView.setDragMode(QGraphicsView.RubberBandDrag)
+            self.canvas.set_mode(None)  # No special mode
+            
+        elif mode == "add_device":
+            # Disable rubber band selection when adding devices
+            self.ui.graphicsView.setDragMode(QGraphicsView.NoDrag)
+            self.canvas.set_mode("add_device")
+            
+        elif mode == "pan":
+            # Allow panning the view
+            self.ui.graphicsView.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.canvas.set_mode(None)
+            
+        # Add other modes as needed

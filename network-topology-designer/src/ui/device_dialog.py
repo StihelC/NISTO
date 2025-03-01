@@ -201,5 +201,16 @@ class DeviceSelectionDialog(QDialog):
         result = dialog.exec_()
         
         if result == QDialog.Accepted:
-            return dialog.get_device_info()
+            device_info = dialog.get_device_info()
+            # Explicitly ensure dialog is deleted
+            dialog.deleteLater()  
+            return device_info
+        
+        # Explicitly ensure dialog is deleted
+        dialog.deleteLater()
         return None
+
+    def accept(self):
+        """Override accept to validate before closing."""
+        # You can add validation here if needed
+        super().accept()
