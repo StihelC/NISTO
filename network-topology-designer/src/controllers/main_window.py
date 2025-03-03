@@ -1,4 +1,5 @@
 # Update imports
+import os  
 from PyQt5.QtWidgets import (
     QMainWindow, 
     QGraphicsView, 
@@ -11,18 +12,59 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QIcon, QPainter, QPen, QColor
 from PyQt5.QtCore import Qt, QPointF
-from ui.network_topo import Ui_MainWindow
-from .canvas_controller import CanvasController
+from ui.network_topo import Ui_MainWindow  # Change to absolute
+from controllers.canvas_controller import CanvasController  # Change to absolute
+from controllers.connection_manager import ConnectionManager  # Change to absolute
+from controllers.device_manager import DeviceManager  # Change to absolute
+
+# Correct imports from connection_manager.py
+from models.connection import NetworkConnection
+
+# Correct imports from device_manager.py
+from models.device import NetworkDevice
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        
+        # Set up the UI from PyQt Designer
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         
-        # Initialize the graphics scene
+        # Create a graphics scene
         self.scene = QGraphicsScene()
         self.ui.graphicsView.setScene(self.scene)
+        
+        # Set scene properties
+        self.ui.graphicsView.setRenderHint(QPainter.Antialiasing)
+        self.ui.graphicsView.setDragMode(QGraphicsView.RubberBandDrag)
+        
+        # Create managers and controllers
+        self.device_manager = DeviceManager(self.scene)
+        self.connection_manager = ConnectionManager(self.scene)
+        
+        # Connect managers to each other
+        self.device_manager.connection_manager = self.connection_manager
+        
+        # Create the canvas controller
+        self.canvas_controller = CanvasController(
+            self.ui.graphicsView, 
+            self.scene, 
+            self.connection_manager,
+            self.device_manager
+        )
+        
+        # Keep a reference to the canvas controller
+        self.canvas = self.canvas_controller
+        
+        # Set up UI action connections
+        self.setup_actions()
+        
+        # Set up quick add toolbar
+        self.setup_quick_add_toolbar()
+        
+        # Start in selection mode
+        self.set_selection_mode()
         
         # Add this to ensure the view displays content properly:
         self.ui.graphicsView.setRenderHint(QPainter.Antialiasing)
@@ -39,9 +81,6 @@ class MainWindow(QMainWindow):
         
         # Add a grid to the scene for better visibility
         self.add_grid_to_scene()
-        
-        # Initialize canvas controller
-        self.canvas = CanvasController(self.ui.graphicsView)
         
         # Connect signals to slots
         self.setup_connections()
@@ -61,8 +100,38 @@ class MainWindow(QMainWindow):
         # Very important - this allows interactive items to receive mouse events directly
         self.ui.graphicsView.setInteractive(True)
         
+        # Connect device toolbar buttons
+        self.ui.actionAdd_Device.triggered.connect(self.set_add_device_mode)
+        
+        # Connect UI actions to methods with detailed error handling
+        try:
+            if hasattr(self.ui, 'actionAdd_Device'):
+                self.ui.actionAdd_Device.triggered.connect(self.set_add_device_mode)
+                print("Connected Add Device action")
+            else:
+                print("Warning: actionAdd_Device not found in UI")
+                
+            if hasattr(self.ui, 'actionAdd_Connection'):
+                self.ui.actionAdd_Connection.triggered.connect(self.set_add_connection_mode)
+                print("Connected Add Connection action")
+                
+            if hasattr(self.ui, 'actionSelect'):
+                self.ui.actionSelect.triggered.connect(self.set_selection_mode)
+                print("Connected Selection action")
+        except Exception as e:
+            print(f"Error connecting actions: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Set up action connections
+        self.setup_actions()
+
+        # Set up quick add toolbar
+        self.setup_quick_add_toolbar()
+
     def setup_ui(self):
-        # ... existing code ...
+        """Set up the user interface components."""
+        # ... existing UI setup code ...
         
         # Add view control actions to toolbar
         self.zoom_in_action = self.toolbar.addAction("Zoom In")
@@ -72,6 +141,18 @@ class MainWindow(QMainWindow):
         # Add a selection mode button to your toolbar in MainWindow.setup_ui
         self.select_action = self.toolbar.addAction("Select")
         self.select_action.triggered.connect(lambda: self.set_canvas_interaction_mode("select"))
+        
+        # Add connection button to toolbar
+        self.connection_action = self.toolbar.addAction("Add Connection")
+        self.connection_action.triggered.connect(self.activate_add_connection)
+        
+        # ... rest of setup ...
+
+    def activate_add_connection(self):
+        """Activate the add connection mode."""
+        self.canvas.set_mode("add_connection")
+        # Update UI to indicate this mode is active
+        self.ui.statusBar.showMessage("Click on a source device, then a target device to create a connection")
 
     def setup_connections(self):
         """Connect UI signals to their corresponding slots."""
@@ -146,6 +227,9 @@ class MainWindow(QMainWindow):
                 
         except Exception as e:
             print(f"Error connecting actions: {e}")
+
+        # Check if they match:
+        print([action.objectName() for action in self.findChildren(QAction)])
 
     def set_device_mode(self, device_type):
         """Set mode to add a specific device type."""
@@ -255,3 +339,115 @@ class MainWindow(QMainWindow):
             self.canvas.set_mode(None)
             
         # Add other modes as needed
+
+    def set_add_device_mode(self):
+        """Set the canvas mode to add devices."""
+        print("Setting mode: add_device")
+        self.canvas.set_mode("add_device")
+        self.statusBar().showMessage("Click on the canvas to add a device")
+
+    def set_add_connection_mode(self):
+        """Set the canvas mode to add connections."""
+        print("Setting mode: add_connection")
+        self.canvas.set_mode("add_connection")
+        self.statusBar().showMessage("Click on a device to start a connection, then click on another device to complete it")
+
+    def set_selection_mode(self):
+        """Set the canvas mode to selection."""
+        print("Setting mode: selection")
+        self.canvas.set_mode("selection")
+        self.statusBar().showMessage("Select items by clicking on them")
+
+    def setup_actions(self):
+        """Set up all UI action connections."""
+        try:
+            # First try the exact names as in the .ui file
+            if hasattr(self.ui, 'actionAdd_Device'):
+                self.ui.actionAdd_Device.triggered.connect(self.set_add_device_mode)
+                print("Connected actionAdd_Device")
+            elif hasattr(self.ui, 'actionAddDevice'):
+                self.ui.actionAddDevice.triggered.connect(self.set_add_device_mode)
+                print("Connected actionAddDevice")
+            else:
+                # Fallback: try to find by text
+                for action in self.findChildren(QAction):
+                    if "add device" in action.text().lower():
+                        action.triggered.connect(self.set_add_device_mode)
+                        print(f"Connected {action.objectName()} for Add Device")
+                        break
+                else:
+                    print("WARNING: Could not find Add Device action")
+            
+            # Add Connection action
+            if hasattr(self.ui, 'actionAdd_Connection'):
+                self.ui.actionAdd_Connection.triggered.connect(self.set_add_connection_mode)
+                print("Connected actionAdd_Connection")
+            elif hasattr(self.ui, 'actionAddConnection'):
+                self.ui.actionAddConnection.triggered.connect(self.set_add_connection_mode)
+                print("Connected actionAddConnection")
+            else:
+                # Fallback: try to find by text
+                for action in self.findChildren(QAction):
+                    if "add connection" in action.text().lower():
+                        action.triggered.connect(self.set_add_connection_mode)
+                        print(f"Connected {action.objectName()} for Add Connection")
+                        break
+                else:
+                    print("WARNING: Could not find Add Connection action")
+                    
+            # Select action
+            if hasattr(self.ui, 'actionSelect'):
+                self.ui.actionSelect.triggered.connect(self.set_selection_mode)
+                print("Connected actionSelect")
+            elif hasattr(self.ui, 'action_Select'):
+                self.ui.action_Select.triggered.connect(self.set_selection_mode)
+                print("Connected action_Select")
+            else:
+                # Fallback: try to find by text
+                for action in self.findChildren(QAction):
+                    if "select" in action.text().lower() and "all" not in action.text().lower():
+                        action.triggered.connect(self.set_selection_mode)
+                        print(f"Connected {action.objectName()} for Select")
+                        break
+                else:
+                    print("WARNING: Could not find Select action")
+            
+        except Exception as e:
+            print(f"Error setting up actions: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def setup_quick_add_toolbar(self):
+        """Set up a toolbar with quick-add buttons for common device types."""
+        from PyQt5.QtWidgets import QToolBar, QAction
+        from PyQt5.QtGui import QIcon
+        from utils.resource_path import get_resource_path
+        
+        # Create toolbar
+        self.quick_add_toolbar = QToolBar("Quick Add Devices")
+        self.addToolBar(Qt.TopToolBarArea, self.quick_add_toolbar)
+        
+        # Common device types
+        device_types = ["router", "switch", "firewall", "server", "workstation"]
+        
+        # Add actions for each device type
+        for device_type in device_types:
+            # Try to load icon
+            icon_path = get_resource_path(f"resources/device_icons/{device_type}.png")
+            action = QAction(device_type.capitalize(), self)
+            
+            if os.path.exists(icon_path):
+                action.setIcon(QIcon(icon_path))
+            
+            # Connect action to lambda function that captures device_type
+            action.triggered.connect(lambda checked, dt=device_type: self.set_quick_add_device_mode(dt))
+            self.quick_add_toolbar.addAction(action)
+        
+        print("Quick add toolbar created")
+
+    def set_quick_add_device_mode(self, device_type):
+        """Set the canvas to quick-add mode for a specific device type."""
+        print(f"Setting quick-add mode for {device_type}")
+        self.canvas.set_quick_add_mode(device_type)
+        self.statusBar().showMessage(f"Click on the canvas to add a {device_type}")
+

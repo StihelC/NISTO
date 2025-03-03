@@ -3,110 +3,297 @@ from PyQt5.QtCore import Qt, QPointF, QObject, QTimer
 from PyQt5.QtGui import QPen, QBrush, QColor, QPainter
 from controllers.device_manager import DeviceManager
 from ui.device_dialog import DeviceSelectionDialog
+from controllers.connection_manager import ConnectionManager
+from models.device import NetworkDevice
 
 class CanvasController(QObject):
-    def __init__(self, view):
+    """Controller for the canvas area."""
+    
+    def __init__(self, view, scene, connection_manager, device_manager=None):
         super().__init__()
         self.view = view
-        self.scene = view.scene()
+        self.scene = scene
+        self.connection_manager = connection_manager
+        self.device_manager = device_manager  # Store reference to device manager
+        self.current_mode = "selection"  # Default mode
+        self.temp_line = None  # Temporary line for drawing connections
         
-        # Initialize managers
-        self.device_manager = DeviceManager(self.scene)
+        # IMPORTANT: Store a reference to the viewport but make it weak
+        import weakref
+        self._viewport_ref = weakref.ref(view.viewport())
         
-        # Set the initial interaction mode
-        self.current_mode = None
+        # Install event filters for mouse events
+        self.view.viewport().installEventFilter(self)
         
-        # Set a fixed scale for the view - use 1.0 for 100% scale
-        self.view.resetTransform()
-        self.default_scale = 1.0
+    def __del__(self):
+        """Clean up when the controller is destroyed."""
+        try:
+            # Remove the event filter if view still exists
+            if hasattr(self, 'view') and self.view and hasattr(self.view, 'viewport'):
+                viewport = self.view.viewport()
+                if viewport:
+                    viewport.removeEventFilter(self)
+                    
+            # Clear references to prevent circular references
+            self.view = None
+            self.scene = None
+            self.connection_manager = None
+            self.device_manager = None
+            self.temp_line = None
+        except:
+            # Ignore errors during cleanup
+            pass
         
-        # Connect the view's mouse press event
-        self.view.mousePressEvent = self.mouse_press_event
-        print("Connected mousePressEvent")
-        
-        # Add custom wheel event for controlled zooming
-        self.original_wheel_event = self.view.wheelEvent
-        self.view.wheelEvent = self.wheel_event
-    
     def set_mode(self, mode):
         """Set the current interaction mode."""
         self.current_mode = mode
-        print(f"Setting mode to: {mode}")
+        print(f"Mode set to: {mode}")
+        
+        # Reset any ongoing operations when mode changes
+        if self.temp_line and self.temp_line.scene():
+            self.scene.removeItem(self.temp_line)
+            self.temp_line = None
+
+    def set_quick_add_mode(self, device_type):
+        """Set the mode to quickly add a device of the specified type."""
+        self.current_mode = "quick_add"
+        self.quick_add_type = device_type
+        
+    def handle_click(self, scene_pos):
+        """Handle a click on the canvas based on current mode."""
+        try:
+            if self.current_mode == "add_device":
+                # Open device selection dialog before adding a device
+                self.show_device_dialog(scene_pos)
+            elif self.current_mode == "quick_add" and hasattr(self, 'quick_add_type'):
+                # Quick add a device of the specified type
+                self.quick_add_device(scene_pos, self.quick_add_type)
+        except Exception as e:
+            print(f"Error in handle_click: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def show_device_dialog(self, scene_pos):
+        """Show the device selection dialog and add a device if confirmed."""
+        try:
+            print("Opening device dialog...")
+            
+            # Get parent window for the dialog
+            parent = None
+            if hasattr(self.view, 'window'):
+                parent = self.view.window()
+                
+            # Create the dialog
+            from ui.device_dialog import DeviceSelectionDialog
+            dialog = DeviceSelectionDialog(parent=parent)
+            
+            # Show the dialog (modal)
+            if dialog.exec_():
+                print("Dialog accepted")
+                
+                # Get the selected properties
+                device_type = dialog.get_device_type().lower()  # Ensure lowercase
+                device_name = dialog.get_device_name()
+                properties = dialog.get_device_properties()
+                
+                print(f"Adding {device_type} named '{device_name}' with properties: {properties}")
+                
+                # Create the device using device manager
+                if hasattr(self, 'device_manager') and self.device_manager:
+                    device = self.device_manager.create_device(
+                        device_type, 
+                        scene_pos.x(), 
+                        scene_pos.y(),
+                        properties=properties
+                    )
+                    return device
+                else:
+                    print("Warning: No device manager available")
+                    # Fallback to direct creation
+                    from models.device import NetworkDevice
+                    device = NetworkDevice(device_type, scene_pos.x(), scene_pos.y())
+                    self.scene.addItem(device)
+                    
+                    # Update properties
+                    for key, value in properties.items():
+                        if hasattr(device, 'update_property'):
+                            device.update_property(key, value)
+                    
+                    return device
+            else:
+                print("Dialog canceled")
+                
+        except Exception as e:
+            print(f"Error showing device dialog: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return None
+
+    def quick_add_device(self, scene_pos, device_type):
+        """Quickly add a device of the specified type without a dialog."""
+        try:
+            print(f"Quick adding {device_type} at {scene_pos.x()}, {scene_pos.y()}")
+            
+            # Auto-generate a name
+            import time
+            device_name = f"{device_type.capitalize()}-{int(time.time()) % 1000}"
+            
+            # Create properties
+            properties = {
+                "name": device_name,
+                "description": f"Auto-created {device_type}"
+            }
+            
+            # Create the device
+            if hasattr(self, 'device_manager') and self.device_manager:
+                device = self.device_manager.create_device(
+                    device_type, scene_pos.x(), scene_pos.y(),
+                    properties=properties
+                )
+                
+                # Reset mode to selection after adding
+                self.current_mode = "selection"
+                
+                return device
+            else:
+                print("Warning: No device manager available for quick add")
+                return None
+        except Exception as e:
+            print(f"Error in quick_add_device: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def add_device_at(self, scene_pos, device_type="router"):
+        """Add a device at the specified position."""
+        # Use device_manager if available, otherwise fall back to direct creation
+        if self.device_manager:
+            device = self.device_manager.create_device(device_type, scene_pos.x(), scene_pos.y())
+        else:
+            # Import here to avoid circular imports
+            from models.device import NetworkDevice
+            device = NetworkDevice(device_type, scene_pos.x(), scene_pos.y())
+            self.scene.addItem(device)
+            
+        print(f"Added {device_type} at ({scene_pos.x()}, {scene_pos.y()})")
+        return device
+    
+    def eventFilter(self, obj, event):
+        """Handle events from the viewport."""
+        try:
+            # Get the current viewport safely
+            viewport = self._viewport_ref()
+            
+            # Check if viewport still exists and matches our object
+            if viewport is None or obj != viewport:
+                return False
+                
+            # Now handle events safely
+            if event.type() == event.MouseButtonPress:
+                self.mouse_press_event(event)
+            elif event.type() == event.MouseMove:
+                self.mouse_move_event(event)
+                
+            return super().eventFilter(obj, event)
+        except Exception as e:
+            print(f"Error in eventFilter: {e}")
+            return False
     
     def mouse_press_event(self, event):
         """Handle mouse press events on the canvas."""
         try:
-            # Check if we're clicking on an item
-            item = self.view.itemAt(event.pos())
-            
-            if item:
-                # If we're clicking on a device, let it handle the event
-                # without changing the scene mode
-                print(f"Clicked on existing item: {type(item).__name__}")
-                # Just pass the event to the default handler
-                super(type(self.view), self.view).mousePressEvent(event)
-                return
-                
-            # If we're not clicking on an item, convert the position and handle based on mode
+            # Convert mouse position to scene coordinates
             scene_pos = self.view.mapToScene(event.pos())
             print(f"Mouse pressed in mode: {self.current_mode}")
             print(f"Scene position: ({scene_pos.x()}, {scene_pos.y()})")
             
-            # Handle based on current mode
-            if self.current_mode:
+            # Check if we're clicking on an item
+            item = self.view.itemAt(event.pos())
+            
+            if self.current_mode == "add_connection":
+                # Handle connection creation
+                if isinstance(item, NetworkDevice):
+                    # Your existing connection code...
+                    pass
+                else:
+                    # Cancel if clicking elsewhere
+                    if hasattr(self.connection_manager, 'cancel_connection'):
+                        self.connection_manager.cancel_connection()
+                    # Remove temporary line
+                    if hasattr(self, 'temp_line') and self.temp_line and hasattr(self.temp_line, 'scene'):
+                        if self.temp_line.scene():
+                            self.scene.removeItem(self.temp_line)
+                        self.temp_line = None
+            elif self.current_mode == "add_device" and not item:
+                # Only add device if clicking on empty space
+                print("Calling handle_click for device creation")
                 self.handle_click(scene_pos)
             
-            # Call the parent class's mousePressEvent
-            super(type(self.view), self.view).mousePressEvent(event)
+            # Call the parent class's mousePressEvent to maintain default behavior
+            if hasattr(self.view.__class__, 'mousePressEvent'):
+                super(self.view.__class__, self.view).mousePressEvent(event)
         except Exception as e:
             print(f"Error in mouse_press_event: {e}")
             import traceback
             traceback.print_exc()
-    
-    def handle_click(self, scene_pos):
-        """Handle mouse clicks on the canvas based on the current mode."""
+
+    def mouse_move_event(self, event):
+        """Handle mouse move events on the canvas."""
         try:
-            print(f"Canvas handling click in mode: {self.current_mode}")
+            # Get scene position
+            scene_pos = self.view.mapToScene(event.pos())
             
-            if self.current_mode == "add_device":
-                self.show_device_dialog(scene_pos)
-            elif self.current_mode == "add_boundary":
-                pass  # Not implemented yet
-            elif self.current_mode == "add_connection":
-                pass  # Not implemented yet
-            elif self.current_mode == "delete":
-                pass  # Not implemented yet
-        except Exception as e:
-            print(f"Error handling mouse click: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    def show_device_dialog(self, position):
-        """Show device selection dialog and add the selected device."""
-        try:
-            print(f"Showing device dialog at position: ({position.x()}, {position.y()})")
-            
-            # The parent should be the main window
-            parent = self.view.window()
-            
-            # Show the dialog
-            device_info = DeviceSelectionDialog.get_device(parent)
-            
-            if device_info:
-                # Create the device with the selected type
-                device = self.device_manager.create_device(device_info["type"], position)
+            # Show temporary connection line when creating connections
+            if self.current_mode == "add_connection" and self.connection_manager.source_device:
+                # Get source port position
+                source_device = self.connection_manager.source_device
+                source_port = self.connection_manager.source_port
                 
-                # Update device properties if it was created successfully
-                if device:
-                    device.update_property("name", device_info["name"])
-                    device.update_property("ip_address", device_info["ip"])
-                    device.update_property("description", device_info["description"])
-                    
-                    # No need to update label position manually since it's part of the group
-                    print(f"Created device: {device_info['name']} of type {device_info['type']}")
+                if source_port and source_port in source_device.ports:
+                    source_point = source_device.get_port_position(source_port)
+                else:
+                    source_point = source_device.sceneBoundingRect().center()
                 
+                # Remove previous temporary line if it exists
+                if self.temp_line and self.temp_line.scene():
+                    self.scene.removeItem(self.temp_line)
+                
+                # Create a new temporary line
+                self.temp_line = self.scene.addLine(
+                    source_point.x(), source_point.y(),
+                    scene_pos.x(), scene_pos.y(),
+                    QPen(QColor(100, 100, 255, 150), 2, Qt.DashLine)
+                )
+                # Store the end point for port selection
+                self.temp_line.temp_line_end = scene_pos
+                
+                # Check if hovering over another device to highlight its ports
+                item_at_cursor = self.view.itemAt(event.pos())
+                if isinstance(item_at_cursor, NetworkDevice) and item_at_cursor != source_device:
+                    # Highlight the closest port
+                    item_at_cursor.highlight_closest_port(scene_pos, True)
+                else:
+                    # Reset highlights on all devices except source
+                    for item in self.scene.items():
+                        if isinstance(item, NetworkDevice) and item != source_device:
+                            item.reset_port_highlights()
+                        
+            elif self.current_mode == "selection":
+                # In selection mode, highlight ports when hovering over devices
+                item_at_cursor = self.view.itemAt(event.pos())
+                if isinstance(item_at_cursor, NetworkDevice):
+                    item_at_cursor.highlight_closest_port(scene_pos, True)
+                
+            # Call the parent class's mouseMoveEvent for default behavior
+            super(self.view.__class__, self.view).mouseMoveEvent(event)
+        except RuntimeError as e:
+            if "has been deleted" in str(e):
+                print("Warning: Attempted to access deleted object")
+            else:
+                print(f"RuntimeError in mouse_move_event: {e}")
         except Exception as e:
-            print(f"Error in show_device_dialog: {e}")
+            print(f"Error in mouse_move_event: {e}")
             import traceback
             traceback.print_exc()
     

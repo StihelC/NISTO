@@ -1,47 +1,81 @@
 from PyQt5.QtCore import QObject
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem
 from PyQt5.QtGui import QPen, QBrush, QColor
-from models.device import NetworkDevice
+from models.device import NetworkDevice  # Change to absolute
 
 class DeviceManager(QObject):
+    """Manages network devices on the canvas."""
+    
     def __init__(self, scene):
         """Initialize the device manager with a QGraphicsScene."""
         super().__init__()
         self.scene = scene
-        self.devices = []  # List to track all devices
+        self.devices = []  # Track all devices
         
-    def create_device(self, device_type, position):
+    def create_device(self, device_type, x, y, size=64, properties=None):
         """Create a new device and add it to the scene."""
         try:
-            print(f"Creating {device_type} at ({position.x()}, {position.y()})")
+            # Create the device
+            device = NetworkDevice(device_type, x, y, size)
             
-            # Create the device with icon and label as a group
-            device = NetworkDevice(
-                device_type=device_type,
-                x=position.x(),
-                y=position.y()
-            )
-            
-            # Add the grouped device to scene
+            # Add it to the scene
             self.scene.addItem(device)
             
             # Track the device
             self.devices.append(device)
             
+            # Update properties if provided
+            if properties:
+                for key, value in properties.items():
+                    device.update_property(key, value)
+                    
+            print(f"Device created: {device_type} at ({x}, {y}) with properties: {properties}")
             return device
         except Exception as e:
             print(f"Error creating device: {e}")
             import traceback
             traceback.print_exc()
             return None
-    
+        
+    def get_device_at(self, scene_pos, margin=10):
+        """Find a device at the given position."""
+        for device in self.devices:
+            rect = device.sceneBoundingRect()
+            # Expand the rect by the margin
+            rect.adjust(-margin, -margin, margin, margin)
+            if rect.contains(scene_pos):
+                return device
+        return None
+        
     def remove_device(self, device):
-        """Remove a device from the scene."""
-        if device in self.devices:
-            self.scene.removeItem(device)  # Removes the entire group
+        """Remove a device and all its connections from the scene."""
+        if device not in self.devices:
+            print(f"Device not found for removal")
+            return False
+            
+        try:
+            # Remove connections first
+            if hasattr(self, 'connection_manager') and self.connection_manager:
+                # If we have a reference to connection manager
+                connections_to_remove = []
+                for conn in self.connection_manager.connections:
+                    if conn.source_device is device or conn.target_device is device:
+                        connections_to_remove.append(conn)
+                        
+                for conn in connections_to_remove:
+                    self.scene.removeItem(conn)
+                    self.connection_manager.connections.remove(conn)
+            
+            # Now remove the device itself
+            self.scene.removeItem(device)
             self.devices.remove(device)
+            print(f"Removed device: {device.properties.get('name', 'unnamed')}")
             return True
-        return False
+        except Exception as e:
+            print(f"Error removing device: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def get_devices_at_position(self, position, device_type=None):
         """Get all devices at the given position, optionally filtered by type."""
