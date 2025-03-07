@@ -4,107 +4,69 @@ from PyQt5.QtCore import Qt, QPointF
 import math
 
 class NetworkConnection(QGraphicsPathItem):
-    """Represents a connection/link between network devices."""
+    """Represents a connection between two network devices."""
     
-    # Connection types with different visual styles
-    CONNECTION_TYPES = {
-        "ethernet": {"color": Qt.black, "style": Qt.SolidLine, "width": 2, "dash": None},
-        "fiber": {"color": QColor(0, 100, 200), "style": Qt.SolidLine, "width": 3, "dash": None},
-        "wireless": {"color": QColor(0, 200, 0), "style": Qt.DashLine, "width": 2, "dash": [5, 5]},
-        "wan": {"color": QColor(200, 0, 0), "style": Qt.SolidLine, "width": 3, "dash": None},
-        "default": {"color": Qt.black, "style": Qt.SolidLine, "width": 2, "dash": None}
-    }
-    
-    def __init__(self, source_device, target_device, connection_type="ethernet", 
-                 source_port=None, target_port=None):
-        super().__init__()
-        
+    def __init__(self, source_device, target_device, connection_type="ethernet",
+                 source_port=None, target_port=None, parent=None):
+        super().__init__(parent)
         self.source_device = source_device
         self.target_device = target_device
         self.connection_type = connection_type
         self.source_port = source_port
         self.target_port = target_port
         
-        # Make connections selectable
-        self.setFlag(QGraphicsItem.ItemIsSelectable)
+        # Set appearance
+        self.setPen(QPen(QColor(0, 0, 0), 2))
+        self.setZValue(-1)  # Draw beneath devices
         
-        # Initialize the path
+        # Create a path between devices
         self.path = QPainterPath()
-        
-        # Set appearance based on connection type
-        self.style = self.CONNECTION_TYPES.get(connection_type, self.CONNECTION_TYPES["default"])
-        
-        # Set the pen for drawing
-        pen = QPen(self.style["color"], self.style["width"], self.style["style"])
-        if self.style["dash"]:
-            pen.setDashPattern(self.style["dash"])
-        self.setPen(pen)
-        
-        # Create a label for the connection (bandwidth, name, etc.)
-        self.label = QGraphicsTextItem("", parent=self)
-        self.label.setDefaultTextColor(Qt.black)
-        
-        # Connection properties
-        self.properties = {
-            "name": f"Connection_{id(self)}",
-            "bandwidth": "1 Gbps",
-            "latency": "0ms",
-            "description": "",
-            "source_port": source_port,
-            "target_port": target_port
-        }
-        
-        # Initial update
         self.update_path()
         
-    def update_property(self, key, value):
-        """Update a property of the connection."""
-        if key in self.properties:
-            self.properties[key] = value
-            
-            # Update label text if needed
-            self.update_label()
-    
+        # Create a label for the connection
+        self.label = QGraphicsTextItem(self)
+        self.label.setPlainText(self.connection_type)
+        self.label.setDefaultTextColor(QColor(0, 0, 0))
+        self.update_label_position()
+        
     def update_path(self):
         """Update the connection path based on device positions and ports."""
         if not self.source_device or not self.target_device:
             return
             
         # Get the source and target points based on port positions
-        if self.source_port and self.source_port in self.source_device.ports:
+        if self.source_port and hasattr(self.source_device, 'get_port_position'):
             source_point = self.source_device.get_port_position(self.source_port)
         else:
             source_point = self.source_device.sceneBoundingRect().center()
             
-        if self.target_port and self.target_port in self.target_device.ports:
+        if self.target_port and hasattr(self.target_device, 'get_port_position'):
             target_point = self.target_device.get_port_position(self.target_port)
         else:
             target_point = self.target_device.sceneBoundingRect().center()
         
-        # Create a path from source to target
+        # Create a smooth path
         self.path = QPainterPath()
-        
-        # Create a nice curve between the points
-        dx = target_point.x() - source_point.x()
-        dy = target_point.y() - source_point.y()
-        dist = math.sqrt(dx*dx + dy*dy)
-        
-        # Create control points for a smooth curve
-        control_dist = dist * 0.4
-        
-        # Basic bezier path
         self.path.moveTo(source_point)
         
-        # For straight connections, use a line
-        if abs(dx) < 20 or abs(dy) < 20:
+        # Calculate midpoint for control points
+        mid_x = (source_point.x() + target_point.x()) / 2
+        mid_y = (source_point.y() + target_point.y()) / 2
+        
+        # Calculate distance between points
+        import math
+        dx = target_point.x() - source_point.x()
+        dy = target_point.y() - source_point.y()
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        # For shorter connections, use a straight line
+        if distance < 100:
             self.path.lineTo(target_point)
         else:
-            # For angled connections, use a curve
-            self.path.cubicTo(
-                source_point.x() + dx * 0.25, source_point.y() + dy * 0.25,
-                source_point.x() + dx * 0.75, source_point.y() + dy * 0.75,
-                target_point.x(), target_point.y()
-            )
+            # For longer connections, use a curved path
+            control1 = QPointF(mid_x, source_point.y())
+            control2 = QPointF(mid_x, target_point.y())
+            self.path.cubicTo(control1, control2, target_point)
         
         # Set the path
         self.setPath(self.path)
@@ -114,69 +76,29 @@ class NetworkConnection(QGraphicsPathItem):
     
     def update_label_position(self):
         """Update the position of the connection label."""
-        # Place the label at the middle of the path
-        if not self.path:
+        if not self.path or self.path.isEmpty():
             return
             
-        # Get the middle point of the path
-        path_length = self.path.length()
-        middle_percent = 0.5  # halfway point
-        middle_point = self.path.pointAtPercent(middle_percent)
+        # Position the label at the middle of the path
+        percent = 0.5  # midpoint
+        point = self.path.pointAtPercent(percent)
         
-        # Position the label at the middle point, slightly offset
-        self.label.setPos(middle_point.x() - self.label.boundingRect().width()/2, 
-                          middle_point.y() - self.label.boundingRect().height() - 5)
-    
-    def update_label(self):
-        """Update the label text based on properties."""
-        # Create label text from properties
-        text = f"{self.properties['name']}\n{self.properties['bandwidth']}"
+        # Offset the label slightly above the path
+        self.label.setPos(point.x() - 20, point.y() - 15)
         
-        # Update the text
-        self.label.setPlainText(text)
-        
-        # Re-position after text change
-        self.update_label_position()
-    
-    def paint(self, painter, option, widget=None):
-        """Custom paint method to draw connection with enhancements."""
-        # Draw the basic path
+    def paint(self, painter, option, widget):
+        """Override paint to customize appearance based on connection type."""
+        # Style based on connection type
+        if self.connection_type.lower() == "ethernet":
+            self.setPen(QPen(QColor(0, 0, 200), 2))
+        elif self.connection_type.lower() == "wireless":
+            # Use a dashed line for wireless
+            pen = QPen(QColor(0, 150, 0), 2, Qt.DashLine)
+            self.setPen(pen)
+        elif self.connection_type.lower() == "serial":
+            self.setPen(QPen(QColor(200, 0, 0), 2))
+        else:
+            self.setPen(QPen(QColor(0, 0, 0), 2))
+            
+        # Call the parent class paint method
         super().paint(painter, option, widget)
-        
-        # Extract the source and target points
-        if not self.source_device or not self.target_device:
-            return
-            
-        source_center = self.mapFromScene(self.source_device.sceneBoundingRect().center())
-        target_center = self.mapFromScene(self.target_device.sceneBoundingRect().center())
-        
-        # Draw arrows to indicate direction if needed
-        if self.connection_type != "wireless":
-            # Calculate the angle of the line
-            dx = target_center.x() - source_center.x()
-            dy = target_center.y() - source_center.y()
-            angle = math.atan2(dy, dx)
-            
-            # Draw arrow near the target
-            arrow_size = 10
-            arrow_point = QPointF(
-                target_center.x() - 20 * math.cos(angle),
-                target_center.y() - 20 * math.sin(angle)
-            )
-            
-            # Create the arrow path
-            arrow_path = QPainterPath()
-            arrow_path.moveTo(arrow_point)
-            arrow_path.lineTo(
-                arrow_point.x() - arrow_size * math.cos(angle - math.pi/6),
-                arrow_point.y() - arrow_size * math.sin(angle - math.pi/6)
-            )
-            arrow_path.lineTo(
-                arrow_point.x() - arrow_size * math.cos(angle + math.pi/6),
-                arrow_point.y() - arrow_size * math.sin(angle + math.pi/6)
-            )
-            arrow_path.closeSubpath()
-            
-            # Fill the arrow
-            painter.setBrush(QBrush(self.pen().color()))
-            painter.drawPath(arrow_path)

@@ -4,56 +4,62 @@ from models.connection import NetworkConnection  # Change to absolute
 import math
 
 class ConnectionManager(QObject):
-    """Manages connections between network devices."""
+    """Manages network connections between devices."""
     
     def __init__(self, scene):
         super().__init__()
         self.scene = scene
         self.connections = []
-        self.connection_mode = None
-        self.source_device = None  # For creating new connections
-        self.source_port = None    # For tracking selected port
         
-    def create_connection(self, source_device, target_device, connection_type="ethernet",
+        # Track current connection being created
+        self.source_device = None
+        self.source_port = None
+        self.temp_connection = None
+        
+    def create_connection(self, source_device, target_device, conn_type="ethernet", 
                          source_port=None, target_port=None):
-        """Create a new connection between devices with specific ports."""
+        """Create a new connection between two devices."""
+        from models.connection import NetworkConnection
+        
         try:
-            # Make sure we're not connecting a device to itself
-            if source_device is target_device:
-                print("Cannot connect device to itself")
-                return None
-                
-            # Check if this connection already exists
-            for conn in self.connections:
-                if ((conn.source_device is source_device and conn.target_device is target_device and
-                     conn.source_port == source_port and conn.target_port == target_port) or
-                    (conn.source_device is target_device and conn.target_device is source_device and
-                     conn.source_port == target_port and conn.target_port == source_port)):
-                    print("Connection already exists")
-                    return conn
+            print(f"Creating connection between {source_device.properties.get('name', 'unnamed')} " +
+                  f"and {target_device.properties.get('name', 'unnamed')}")
+            print(f"Source port: {source_port}, Target port: {target_port}")
             
-            # Create the new connection
-            connection = NetworkConnection(source_device, target_device, connection_type, 
-                                         source_port, target_port)
+            # Create the connection
+            connection = NetworkConnection(
+                source_device, target_device,
+                conn_type, source_port, target_port
+            )
             
-            # Add to scene
+            # Add it to the scene
             self.scene.addItem(connection)
             
-            # Track the connection
+            # Track it
             self.connections.append(connection)
             
-            # Update the path
+            # Add the connection to each device's port tracking
+            # Initialize port_connections dict if needed
+            if not hasattr(source_device, 'port_connections'):
+                source_device.port_connections = {}
+            if not hasattr(target_device, 'port_connections'):
+                target_device.port_connections = {}
+            
+            # Add to source device's port connections
+            if source_port:
+                if source_port not in source_device.port_connections:
+                    source_device.port_connections[source_port] = []
+                source_device.port_connections[source_port].append(connection)
+            
+            # Add to target device's port connections
+            if target_port:
+                if target_port not in target_device.port_connections:
+                    target_device.port_connections[target_port] = []
+                target_device.port_connections[target_port].append(connection)
+            
+            # Update connection path
             connection.update_path()
             
-            # Update port connection tracking in devices
-            if source_port:
-                source_device.add_connection_to_port(source_port, connection)
-                
-            if target_port:
-                target_device.add_connection_to_port(target_port, connection)
-            
-            print(f"Created connection between {source_device.properties['name']} ({source_port}) "
-                  f"and {target_device.properties['name']} ({target_port})")
             return connection
         except Exception as e:
             print(f"Error creating connection: {e}")
@@ -109,7 +115,6 @@ class ConnectionManager(QObject):
         """Cancel the current connection being created."""
         self.source_device = None
         self.source_port = None
-        self.connection_mode = None
         print("Connection creation canceled")
     
     def update_all_connections(self):

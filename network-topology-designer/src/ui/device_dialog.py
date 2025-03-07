@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QHBoxLayout,
     QLineEdit, QComboBox, QPushButton, QLabel, 
-    QDialogButtonBox, QWidget, QApplication, QSizePolicy  # Add QSizePolicy here
+    QDialogButtonBox, QWidget, QApplication, QSizePolicy, QTextEdit  # Add QSizePolicy and QTextEdit here
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QPixmap
@@ -127,7 +127,8 @@ class DeviceSelectionDialog(QDialog):
         properties_layout.addRow("IP Address:", self.ip_edit)
         
         # Description
-        self.desc_edit = QLineEdit()
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setMaximumHeight(100)
         if self.device and hasattr(self.device, 'properties') and 'description' in self.device.properties:
             self.desc_edit.setText(self.device.properties['description'])
         properties_layout.addRow("Description:", self.desc_edit)
@@ -142,6 +143,14 @@ class DeviceSelectionDialog(QDialog):
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
         main_layout.addWidget(self.button_box)
+        
+        # Ensure only one connection for accept/reject
+        self.button_box.accepted.disconnect() if self.button_box.receivers(self.button_box.accepted) > 0 else None
+        self.button_box.rejected.disconnect() if self.button_box.receivers(self.button_box.rejected) > 0 else None
+        
+        # Reconnect once
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
         
         # Update the preview
         self.update_preview()
@@ -196,7 +205,7 @@ class DeviceSelectionDialog(QDialog):
         return {
             "name": self.get_device_name(),
             "ip_address": self.ip_edit.text(),
-            "description": self.desc_edit.text()
+            "description": self.desc_edit.toPlainText()
         }
     
     @classmethod
