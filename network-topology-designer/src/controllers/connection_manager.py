@@ -1,6 +1,6 @@
 from PyQt5.QtCore import QObject, QPointF, Qt
 from PyQt5.QtGui import QPen, QColor
-from models.connection import NetworkConnection  # Change to absolute
+from models.connection import Connection  # Fixed class name
 import math
 
 class ConnectionManager(QObject):
@@ -16,51 +16,18 @@ class ConnectionManager(QObject):
         self.source_port = None
         self.temp_connection = None
         
-    def create_connection(self, source_device, target_device, conn_type="ethernet", 
+    def create_connection(self, source_device, target_device, connection_type="ethernet", 
                          source_port=None, target_port=None):
         """Create a new connection between two devices."""
-        from models.connection import NetworkConnection
-        
         try:
-            print(f"Creating connection between {source_device.properties.get('name', 'unnamed')} " +
-                  f"and {target_device.properties.get('name', 'unnamed')}")
-            print(f"Source port: {source_port}, Target port: {target_port}")
+            connection = Connection(source_device, target_device, 
+                                  connection_type, source_port, target_port)
             
-            # Create the connection
-            connection = NetworkConnection(
-                source_device, target_device,
-                conn_type, source_port, target_port
-            )
-            
-            # Add it to the scene
             self.scene.addItem(connection)
-            
-            # Track it
             self.connections.append(connection)
             
-            # Add the connection to each device's port tracking
-            # Initialize port_connections dict if needed
-            if not hasattr(source_device, 'port_connections'):
-                source_device.port_connections = {}
-            if not hasattr(target_device, 'port_connections'):
-                target_device.port_connections = {}
-            
-            # Add to source device's port connections
-            if source_port:
-                if source_port not in source_device.port_connections:
-                    source_device.port_connections[source_port] = []
-                source_device.port_connections[source_port].append(connection)
-            
-            # Add to target device's port connections
-            if target_port:
-                if target_port not in target_device.port_connections:
-                    target_device.port_connections[target_port] = []
-                target_device.port_connections[target_port].append(connection)
-            
-            # Update connection path
-            connection.update_path()
-            
             return connection
+            
         except Exception as e:
             print(f"Error creating connection: {e}")
             import traceback

@@ -1,268 +1,179 @@
-from PyQt5.QtWidgets import (
-    QGraphicsItem,
-    QGraphicsItemGroup,
-    QGraphicsPixmapItem,
-    QGraphicsTextItem,
-    QGraphicsRectItem,
-    QGraphicsEllipseItem
-)
-from PyQt5.QtCore import Qt, QPointF, QRectF  # Add QRectF here
-from PyQt5.QtGui import QPen, QPixmap, QColor, QBrush, QFont, QPainterPath
-import os
-import math
-from utils.resource_path import get_resource_path
+from PyQt5.QtWidgets import QGraphicsItem, QGraphicsTextItem
+from PyQt5.QtGui import QPixmap, QPainter, QColor, QBrush, QPen, QFont
+from PyQt5.QtCore import Qt, QRectF, QTimer
 
-class NetworkDevice(QGraphicsItemGroup):  # Change to QGraphicsItemGroup
-    """Represents a network device in the topology."""
+# Add sys path to ensure imports work
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.resource_manager import ResourceManager
+
+class NetworkDevice(QGraphicsItem):
+    """Represents a network device on the canvas."""
     
-    def __init__(self, device_type, x, y, size=64, properties=None):
-        super().__init__()  # Call the parent constructor
-        self.device_type = device_type.lower()
+    def __init__(self, device_type, x, y, size=40):
+        super().__init__()
+        self.device_type = device_type
         self.size = size
-        self.properties = properties or {}
-        self.setPos(x, y)
-        
-        # Connection tracking
-        self.port_connections = {}  # Maps port_id -> list of connections
-        
-        # Ports dictionary (port_id -> port item)
         self.ports = {}
+        self.properties = {}
         
-        # Set up the visual appearance
-        self.setup_visuals()
+        # Position device with center at click point
+        self.setPos(x - size/2, y - size/2)
         
-        # Allow item to be moved by mouse
+        # Load icon
+        self.icon_pixmap = ResourceManager.load_device_icon(device_type, size)
+        
+        # Set flags
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
     
-    def setup_visuals(self):
-        """Set up the visual appearance of the device."""
-        from utils.resource_path import get_resource_path
-        import os
+    def boundingRect(self):
+        """Define the bounding rectangle for this item."""
+        from PyQt5.QtCore import QRectF
         
-        # Create icon
-        icon_path = get_resource_path(f'resources/device_icons/{self.device_type}.png')
-        if not os.path.exists(icon_path):
-            print(f"Icon not found: {icon_path}, using default")
-            icon_path = get_resource_path('resources/device_icons/default.png')
+        # Ensure bounding rectangle includes space for labels, but with LESS padding
+        label_height = 0
+        if hasattr(self, 'label'):
+            label_height += self.label.boundingRect().height()
+        if hasattr(self, 'ip_label'):
+            label_height += self.ip_label.boundingRect().height()
+            
+        # Add less padding (reduced from +20 to +10)
+        total_height = self.size + label_height + 10  # REDUCED PADDING HERE
         
-        pixmap = QPixmap(icon_path).scaled(self.size, self.size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.icon_item = QGraphicsPixmapItem(pixmap)
-        self.icon_item.setPos(-self.size/2, -self.size/2)  # Center the icon
-        self.addToGroup(self.icon_item)  # This will work now with QGraphicsItemGroup
+        # Center the device in the bounding rect
+        return QRectF(-self.size/2, -self.size/2, self.size, total_height)
+    
+    def paint(self, painter, option, widget):
+        """Paint the device icon."""
+        from PyQt5.QtCore import QRectF
         
-        # Create ports
-        self._create_ports()
+        # Draw the device icon centered at (0,0)
+        if hasattr(self, 'icon_pixmap') and not self.icon_pixmap.isNull():
+            # Use QRectF to handle floating point coordinates
+            target_rect = QRectF(-self.size/2, -self.size/2, self.size, self.size)
+            painter.drawPixmap(target_rect, self.icon_pixmap, QRectF(self.icon_pixmap.rect()))
         
-        # Create label for the device name
-        from PyQt5.QtWidgets import QGraphicsTextItem
-        name = self.properties.get('name', 'Device')
-        self.label = QGraphicsTextItem(name)  # Use the passed-in name
-        self.label.setPos(-self.label.boundingRect().width()/2, self.size/2)  # Position below the icon
-        self.addToGroup(self.label)
+        # Draw selection rectangle if selected
+        if self.isSelected():
+            from PyQt5.QtGui import QPen, QColor
+            from PyQt5.QtCore import Qt
+            painter.setPen(QPen(QColor(0, 120, 215), 2, Qt.DashLine))
+            # Create a QRectF for the selection rectangle
+            selection_rect = QRectF(-self.size/2, -self.size/2, self.size, self.size)
+            painter.drawRect(selection_rect)
+    
+    def update_property(self, key, value):
+        """Update a device property and refresh display if needed."""
+        if not hasattr(self, 'properties'):
+            self.properties = {}
         
-        # Show label for debugging
-        print(f"Created device label with name: {name}")
+        self.properties[key] = value
+        
+        # Handle name label
+        if key == 'name':
+            if not hasattr(self, 'label'):
+                from PyQt5.QtWidgets import QGraphicsTextItem
+                from PyQt5.QtCore import Qt
+                
+                # Create as CHILD item instead of separate scene item
+                self.label = QGraphicsTextItem(self)  # Make it a child of device
+                self.label.setDefaultTextColor(Qt.black)
+            
+            # Update text
+            self.label.setPlainText(value)
+            
+            # Position centered below device with LESS spacing (reduced from +5 to +2)
+            label_width = self.label.boundingRect().width()
+            self.label.setPos(-label_width/2, self.size/2 + 2)  # REDUCED SPACING HERE
+        
+        # Handle IP address label
+        elif key == 'ip_address' and value:
+            if not hasattr(self, 'ip_label'):
+                from PyQt5.QtWidgets import QGraphicsTextItem
+                from PyQt5.QtCore import Qt
+                from PyQt5.QtGui import QFont
+                
+                # Create as CHILD item
+                self.ip_label = QGraphicsTextItem(self)
+                font = QFont()
+                font.setPointSize(8)  # Keep small font
+                self.ip_label.setFont(font)
+                self.ip_label.setDefaultTextColor(Qt.darkBlue)
+            
+            # Update text
+            self.ip_label.setPlainText(value)
+            
+            # Position centered below name with LESS spacing (reduced from +10 to +4)
+            ip_width = self.ip_label.boundingRect().width()
+            name_height = 0
+            if hasattr(self, 'label'):
+                name_height = self.label.boundingRect().height()
+            
+            # Reduced vertical spacing
+            self.ip_label.setPos(-ip_width/2, self.size/2 + name_height + 4)  # REDUCED SPACING HERE
+        
+        # Update tooltip
+        tooltip = ""
+        for prop_key, prop_value in self.properties.items():
+            if prop_value:
+                tooltip += f"{prop_key}: {prop_value}\n"
+        self.setToolTip(tooltip.strip())
+        
+        return True
+    
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionHasChanged and self.scene():
+            # Update label positions when device moves
+            QTimer.singleShot(0, self._update_label_positions)
+        
+        return super().itemChange(change, value)
+    
+    def _update_label_positions(self):
+        """Update the positions of all labels when device moves."""
+        if not self.scene():
+            return
+        
+        # Update name label position
+        if hasattr(self, 'label') and self.label:
+            label_width = self.label.boundingRect().width()
+            device_center_x = self.x() + self.size/2
+            device_bottom_y = self.y() + self.size
+            self.label.setPos(device_center_x - label_width/2, device_bottom_y + 5)
+        
+        # Update IP label position
+        if hasattr(self, 'ip_label') and self.ip_label:
+            ip_width = self.ip_label.boundingRect().width()
+            name_height = 0
+            if hasattr(self, 'label'):
+                name_height = self.label.boundingRect().height()
+            
+            device_center_x = self.x() + self.size/2
+            device_bottom_y = self.y() + self.size
+            self.ip_label.setPos(device_center_x - ip_width/2, 
+                                device_bottom_y + name_height + 10)
     
     def _create_ports(self):
         """Create ports around the device."""
+        from PyQt5.QtWidgets import QGraphicsEllipseItem
+        from PyQt5.QtGui import QBrush, QColor
+        from PyQt5.QtCore import Qt, QRectF
+        
         port_size = 8
         device_size = self.size
         
-        # Create ports on all four sides
-        # Top ports
-        for i in range(3):
-            port = QGraphicsRectItem(-port_size/2, -device_size/2 - port_size, port_size, port_size)
-            port_x = (i - 1) * (device_size/3)
-            port.setPos(port_x, 0)
-            port.setBrush(QBrush(QColor(50, 150, 255)))  # Blue for port
-            port.setPen(QPen(Qt.black, 1))
-            port.setVisible(False)  # Initially hidden
-            
-            # Store port reference with ID
+        # Use QRectF for all port creation to handle floating point positions
+        # Example for top ports:
+        spacing = device_size / (self.num_ports_per_side + 1)
+        for i in range(self.num_ports_per_side):
             port_id = f"top_{i}"
-            self.ports[port_id] = port
+            x_pos = -device_size/2 + spacing * (i + 1) - port_size/2
+            y_pos = -device_size/2 - port_size/2
             
-            # Store original rect for reset
-            port.default_rect = QRectF(port.rect())
-            
-            # Add to group
-            self.addToGroup(port)
-        
-        # Bottom ports
-        for i in range(3):
-            port = QGraphicsRectItem(-port_size/2, device_size/2, port_size, port_size)
-            port_x = (i - 1) * (device_size/3)
-            port.setPos(port_x, 0)
-            port.setBrush(QBrush(QColor(50, 150, 255)))  # Blue for port
-            port.setPen(QPen(Qt.black, 1))
-            port.setVisible(False)  # Initially hidden
-            
-            # Store port reference with ID
-            port_id = f"bottom_{i}"
-            self.ports[port_id] = port
-            
-            # Store original rect for reset
-            port.default_rect = QRectF(port.rect())
-            
-            # Add to group
-            self.addToGroup(port)
-        
-        # Left ports
-        for i in range(3):
-            port = QGraphicsRectItem(-device_size/2 - port_size, -port_size/2, port_size, port_size)
-            port_y = (i - 1) * (device_size/3)
-            port.setPos(0, port_y)
-            port.setBrush(QBrush(QColor(50, 150, 255)))  # Blue for port
-            port.setPen(QPen(Qt.black, 1))
-            port.setVisible(False)  # Initially hidden
-            
-            # Store port reference with ID
-            port_id = f"left_{i}"
-            self.ports[port_id] = port
-            
-            # Store original rect for reset
-            port.default_rect = QRectF(port.rect())
-            
-            # Add to group
-            self.addToGroup(port)
-        
-        # Right ports
-        for i in range(3):
-            port = QGraphicsRectItem(device_size/2, -port_size/2, port_size, port_size)
-            port_y = (i - 1) * (device_size/3)
-            port.setPos(0, port_y)
-            port.setBrush(QBrush(QColor(50, 150, 255)))  # Blue for port
-            port.setPen(QPen(Qt.black, 1))
-            port.setVisible(False)  # Initially hidden
-            
-            # Store port reference with ID
-            port_id = f"right_{i}"
-            self.ports[port_id] = port
-            
-            # Store original rect for reset
-            port.default_rect = QRectF(port.rect())
-            
-            # Add to group
-            self.addToGroup(port)
-    
-    def get_closest_port(self, scene_pos):
-        """Get the closest port to a scene position."""
-        device_pos = self.scenePos()
-        closest_port = None
-        min_distance = float('inf')
-        
-        for port_id, port in self.ports.items():
-            port_scene_pos = self.mapToScene(port.pos())
-            dx = scene_pos.x() - port_scene_pos.x()
-            dy = scene_pos.y() - port_scene_pos.y()
-            distance = (dx*dx + dy*dy)**0.5
-            
-            if distance < min_distance:
-                min_distance = distance
-                closest_port = port_id
-        
-        return closest_port, min_distance
-    
-    def get_port_position(self, port_id):
-        """Get the scene position of a port."""
-        if port_id not in self.ports:
-            return self.sceneBoundingRect().center()
-            
-        port = self.ports[port_id]
-        port_center = port.sceneBoundingRect().center()
-        return port_center
-    
-    def highlight_port(self, port_id, highlight=True):
-        """Highlight a specific port by ID."""
-        if port_id not in self.ports:
-            return
-            
-        port = self.ports[port_id]
-        
-        if highlight:
-            # Highlight port - make it bigger and orange
-            port.setBrush(QBrush(QColor(255, 165, 0)))  # Orange for highlight
-            port.setPen(QPen(Qt.red, 2))
-            
-            # Make it slightly larger while highlighted
-            rect = port.rect()
-            center = rect.center()
-            
-            # Use existing rect to create new one
-            new_rect = QRectF(
-                center.x() - rect.width() * 0.6,
-                center.y() - rect.height() * 0.6,
-                rect.width() * 1.2,
-                rect.height() * 1.2
-            )
-            port.setRect(new_rect)
-        else:
-            # Reset to default appearance
-            is_connected = False
-            if hasattr(self, 'port_connections') and port_id in self.port_connections:
-                is_connected = len(self.port_connections[port_id]) > 0
-            
-            # Set color based on connection status
-            if is_connected:
-                port.setBrush(QBrush(QColor(50, 200, 50)))  # Green for connected
-            else:
-                port.setBrush(QBrush(QColor(50, 150, 255)))  # Blue for available
-                
-            port.setPen(QPen(Qt.black, 1))
-            
-            # Reset size to default
-            if hasattr(port, 'default_rect'):
-                port.setRect(port.default_rect)
-    
-    def reset_port_highlights(self):
-        """Reset all port highlights to default."""
-        for port_id in self.ports:
-            self.highlight_port(port_id, False)
-    
-    def show_all_ports(self, visible=True):
-        """Make all ports visible/invisible."""
-        for port_id, port in self.ports.items():
-            if visible:
-                # Make ports more prominent
-                port.setBrush(QBrush(QColor(50, 150, 255)))  # Blue for available
-                port.setPen(QPen(Qt.black, 1))
-                port.setVisible(True)
-            else:
-                # Check if port is connected
-                is_connected = False
-                if hasattr(self, 'port_connections') and port_id in self.port_connections:
-                    is_connected = len(self.port_connections[port_id]) > 0
-                
-                if is_connected:
-                    # Keep connected ports visible but subtle
-                    port.setBrush(QBrush(QColor(50, 200, 50)))  # Green for connected
-                    port.setPen(QPen(Qt.black, 1))
-                    port.setVisible(True)
-                else:
-                    # Hide unused ports in normal mode
-                    port.setVisible(False)
-    
-    def itemChange(self, change, value):
-        """Handle changes to the item."""
-        if change == QGraphicsItem.ItemPositionChange:
-            # When position changes, update connections
-            return value
-        
-        if change == QGraphicsItem.ItemPositionHasChanged:
-            # After position change, update all connections
-            self.update_connections()
-            return value
-        
-        return value
-    
-    def update_connections(self):
-        """Update all connections attached to this device."""
-        if hasattr(self, 'port_connections'):
-            for port_id, connections in self.port_connections.items():
-                for connection in connections:
-                    if connection:
-                        connection.update_path()
+            # Use QRectF instead of direct coordinates
+            port_rect = QRectF(x_pos, y_pos, port_size, port_size)
+            port = QGraphicsEllipseItem(port_rect, self)
+            # Rest of port creation...
 
 

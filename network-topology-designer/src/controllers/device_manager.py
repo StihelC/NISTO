@@ -12,25 +12,37 @@ class DeviceManager(QObject):
         self.scene = scene
         self.devices = []  # Track all devices
         
-    def create_device(self, device_type, x, y, size=64, properties=None):
-        """Create a new device and add it to the scene."""
+    def create_device(self, device_type, x, y, properties=None):
+        """Create a new device at the specified location."""
         try:
-            # Create the device
-            device = NetworkDevice(device_type, x, y, size)
+            print(f"Creating device of type {device_type} at position ({x}, {y})")
             
-            # Add it to the scene
+            # Store exact creation coordinates
+            click_x = x
+            click_y = y
+            
+            # Create the device
+            from models.device import NetworkDevice
+            device = NetworkDevice(device_type, click_x, click_y)
+            
+            # Add to scene
             self.scene.addItem(device)
             
-            # Track the device
+            # Set device properties
+            properties = properties or {}
+            default_name = f"{device_type.capitalize()}-{len(self.devices) + 1}"
+            properties['name'] = properties.get('name', default_name)
+            
+            for key, value in properties.items():
+                if hasattr(device, 'update_property'):
+                    device.update_property(key, value)
+            
+            # Store in the device list
             self.devices.append(device)
             
-            # Update properties if provided
-            if properties:
-                for key, value in properties.items():
-                    device.update_property(key, value)
-                    
-            print(f"Device created: {device_type} at ({x}, {y}) with properties: {properties}")
+            print(f"Created device label with name: {properties.get('name')}")
             return device
+        
         except Exception as e:
             print(f"Error creating device: {e}")
             import traceback

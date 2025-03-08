@@ -296,7 +296,7 @@ class CanvasController(QObject):
                     self.drag_source_port = None
                     self.drag_source_point = None
                     
-                    # Find the closest port
+                    # Find the closest port with clear feedback
                     closest_port = None
                     distance = float('inf')
                     
@@ -304,17 +304,19 @@ class CanvasController(QObject):
                         closest_port, distance = device.get_closest_port(scene_pos)
                         print(f"Closest port: {closest_port}, distance: {distance}")
                     
-                    # Always use a port for connection start (closest one)
-                    if closest_port:
-                        # Start connection from the port
+                    # Only use a port if it's close enough (within 15 pixels)
+                    if closest_port and distance <= 15:
+                        # Show visual feedback
+                        if hasattr(device, 'highlight_port'):
+                            device.highlight_port(closest_port, True)
+                        
+                        # Start connection from this port
+                        self.dragging_connection = True
                         self.drag_source_device = device
                         self.drag_source_port = closest_port
                         
-                        # Get exact port position for line start
-                        if hasattr(device, 'get_port_position'):
-                            self.drag_source_point = device.get_port_position(closest_port)
-                        else:
-                            self.drag_source_point = device.sceneBoundingRect().center()
+                        # Use exact port position for better visuals
+                        self.drag_source_point = device.get_port_position(closest_port)
                         
                         # Highlight the selected port
                         if hasattr(device, 'highlight_port'):
@@ -395,66 +397,42 @@ class CanvasController(QObject):
     def mouse_move_event(self, event):
         """Handle mouse move events on the canvas."""
         try:
-            # Get scene position
             scene_pos = self.view.mapToScene(event.pos())
             
-            # Update temporary connection line during dragging
-            if (hasattr(self, 'dragging_connection') and self.dragging_connection and 
-                hasattr(self, 'temp_line') and self.temp_line and 
-                hasattr(self, 'drag_source_point') and self.drag_source_point):
+            # When in connection mode and dragging a connection
+            if self.current_mode == "add_connection" and hasattr(self, 'dragging_connection') and self.dragging_connection:
+                # Define a default target_point (this was missing)
+                target_point = scene_pos  # Default to current mouse position
                 
-                # Update the line endpoint
-                self.temp_line.setLine(
-                    self.drag_source_point.x(), self.drag_source_point.y(),
-                    scene_pos.x(), scene_pos.y()
-                )
-                
-                # Check if hovering over a device
+                # Get item under cursor
                 item_at_cursor = self.view.itemAt(event.pos())
                 
-                from models.device import NetworkDevice
-                
-                # Reset highlights on all devices except source
-                for device_item in self.scene.items():
-                    if (isinstance(device_item, NetworkDevice) and 
-                        device_item != self.drag_source_device and
-                        hasattr(device_item, 'reset_port_highlights')):
-                        device_item.reset_port_highlights()
-                        
-                        # Hide ports on devices we're not hovering over
-                        if device_item != item_at_cursor and hasattr(device_item, 'show_all_ports'):
-                            device_item.show_all_ports(False)
-                
-                # If hovering over a device, highlight its ports
-                if (isinstance(item_at_cursor, NetworkDevice) and 
-                    item_at_cursor != self.drag_source_device):
+                if isinstance(item_at_cursor, NetworkDevice):
+                    # Find closest port if hovering over device
+                    closest_port, distance = item_at_cursor.get_closest_port(scene_pos)
                     
-                    # Show this device's ports
-                    if hasattr(item_at_cursor, 'show_all_ports'):
-                        item_at_cursor.show_all_ports(True)
-                    
-                    # Highlight the closest port if within range
-                    closest_port = None
-                    distance = float('inf')
-                    
-                    if hasattr(item_at_cursor, 'get_closest_port'):
-                        closest_port, distance = item_at_cursor.get_closest_port(scene_pos)
-                    
-                    if closest_port and distance <= 20 and hasattr(item_at_cursor, 'highlight_port'):
+                    if closest_port and distance <= 15:
+                        # Use port position as target point if close enough
+                        target_point = item_at_cursor.get_port_position(closest_port)
+                        # Highlight the port
                         item_at_cursor.highlight_port(closest_port, True)
-                        
-                        # Draw the line to the exact port position
-                        if hasattr(item_at_cursor, 'get_port_position'):
-                            target_point = item_at_cursor.get_port_position(closest_port)
-                            self.temp_line.setLine(
-                                self.drag_source_point.x(), self.drag_source_point.y(),
-                                target_point.x(), target_point.y()
-                            )
-                        
-            # Call the parent class's mouseMoveEvent for default behavior
-            if hasattr(self.view.__class__, 'mouseMoveEvent'):
-                super(self.view.__class__, self.view).mouseMoveEvent(event)
-            
+                
+                # Now target_point is defined in all code paths
+                
+                # Remove previous temp line if exists
+                if hasattr(self, 'temp_line') and self.temp_line:
+                    self.scene.removeItem(self.temp_line)
+                
+                # Create new temp line from source to target point
+                if hasattr(self, 'drag_source_point'):
+                    self.temp_line = self.scene.addLine(
+                        self.drag_source_point.x(), self.drag_source_point.y(),
+                        target_point.x(), target_point.y(),
+                        QPen(QColor(100, 100, 255, 150), 2, Qt.DashLine)
+                    )
+                
+            # Handle other mouse move events...
+            super(self.view.__class__, self.view).mouseMoveEvent(event)
         except Exception as e:
             print(f"Error in mouse_move_event: {e}")
             import traceback
@@ -686,16 +664,19 @@ class CanvasController(QObject):
             return False
 
     def _handle_boundary_drag(self, scene_pos):
-        """Update boundary size during dragging."""
-        if hasattr(self, 'temp_rect') and self.temp_rect:
-            # Calculate the new rectangle
+        """Update the temporary boundary rectangle during drag."""
+        if hasattr(self, 'boundary_start') and hasattr(self, 'temp_rect'):
+            # Calculate rectangle dimensions with proper float handling
+            from PyQt5.QtCore import QRectF
+            
             start_x = min(self.boundary_start.x(), scene_pos.x())
             start_y = min(self.boundary_start.y(), scene_pos.y())
             width = abs(scene_pos.x() - self.boundary_start.x())
             height = abs(scene_pos.y() - self.boundary_start.y())
             
-            # Update the rectangle
-            self.temp_rect.setRect(start_x, start_y, width, height)
+            # Use setRect with QRectF for proper float handling
+            self.temp_rect.setRect(QRectF(start_x, start_y, width, height))
+            self.scene.update()
 
     def _handle_boundary_finish(self, scene_pos):
         """Complete the boundary creation."""
@@ -865,3 +846,11 @@ class CanvasController(QObject):
             traceback.print_exc()
         
         return True  # Always return a boolean value
+
+    def _highlight_area(self, rect):
+        """Highlight a rectangular area."""
+        from PyQt5.QtCore import QRectF
+        
+        # Convert potentially floating point values to QRectF
+        highlight_rect = QRectF(rect.x(), rect.y(), rect.width(), rect.height())
+        self.scene.addRect(highlight_rect, self.highlight_pen)
