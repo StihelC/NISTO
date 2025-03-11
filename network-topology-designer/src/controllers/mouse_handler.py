@@ -37,32 +37,36 @@ class MouseHandler(QObject):
         self.view.viewport().installEventFilter(self)
         
     def eventFilter(self, obj, event):
-        """Filter events from the viewport."""
+        """Filter events for mouse handling."""
         try:
-            if obj == self.view.viewport():
-                from PyQt5.QtCore import QEvent, Qt
-                
-                if event.type() == QEvent.MouseButtonPress:
-                    handled = self.handle_mouse_press(event)
-                    return bool(handled)
-                    
-                elif event.type() == QEvent.MouseMove:
-                    # Important: For boundary drawing, we need to handle all mouse moves
-                    if hasattr(self.canvas, 'current_mode') and self.canvas.current_mode == "add_boundary":
-                        handled = self.handle_mouse_move(event)
-                        return True  # Always consume move events during boundary creation
-                    else:
-                        # For other modes, only track moves with button pressed
-                        if event.buttons() & Qt.LeftButton:
-                            handled = self.handle_mouse_move(event)
-                            return bool(handled)
-                    
-                elif event.type() == QEvent.MouseButtonRelease:
-                    handled = self.handle_mouse_release(event)
-                    return bool(handled)
+            # Check if view exists and is valid before proceeding
+            if not hasattr(self, 'view') or not self.view:
+                return False
             
-            # Let the event propagate to other handlers
-            return super().eventFilter(obj, event) if hasattr(super(), 'eventFilter') else False
+            # Safely check viewport
+            try:
+                viewport = self.view.viewport()
+                if not viewport or obj != viewport:
+                    return False
+            except RuntimeError:  # Handles C++ object deleted case
+                return False
+                
+            # Now handle the event
+            event_type = event.type()
+            
+            if event_type == QEvent.MouseButtonPress:
+                self.handle_mouse_press(event)
+                return False  # Let the event propagate
+                
+            elif event_type == QEvent.MouseMove:
+                self.handle_mouse_move(event)
+                return False  # Let the event propagate
+                
+            elif event_type == QEvent.MouseButtonRelease:
+                self.handle_mouse_release(event)
+                return False  # Let the event propagate
+                
+            return False  # Let other events through
             
         except Exception as e:
             print(f"Error in MouseHandler.eventFilter: {e}")

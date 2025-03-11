@@ -1,10 +1,12 @@
 import sys
 import os
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import Qt
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt5.QtWidgets import QApplication
 from controllers.main_window import MainWindow  # Absolute import
 from utils.logger import logger
 from utils.init_resources import init_resources
@@ -28,7 +30,12 @@ def check_resources():
     print("Resource check complete")
 
 def main():
+    """Main application entry point."""
     logger.info("Starting Network Topology Designer")
+    
+    # Enable high DPI scaling
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     
     # Initialize resources
     init_resources()
@@ -36,10 +43,17 @@ def main():
     # Check resources first
     check_resources()
     
+    # Create application
     app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
+    app.setApplicationName("Network Topology Designer")
+    app.setOrganizationName("NISTO")
+    
+    # Create and show main window
+    main_window = MainWindow()
+    main_window.show()
     logger.info("Application window shown")
+    
+    # Start the event loop
     return app.exec_()
 
 if __name__ == "__main__":

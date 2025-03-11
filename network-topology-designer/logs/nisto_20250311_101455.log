@@ -1,0 +1,16 @@
+2025-03-11 10:14:55,656 - nisto - INFO - Starting Network Topology Designer
+2025-03-11 10:14:56,071 - nisto - ERROR - Unhandled exception in main
+Traceback (most recent call last):
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/main.py", line 61, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/main.py", line 52, in main
+    main_window = MainWindow()
+                  ^^^^^^^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/controllers/main_window.py", line 65, in __init__
+    self.file_manager = FileManager(
+                        ^^^^^^^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/controllers/file_manager.py", line 19, in __init__
+    self.dialog_manager = FileDialogManager(main_window.view)
+                                            ^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'view'

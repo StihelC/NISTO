@@ -1,131 +1,563 @@
 from PyQt5.QtCore import QObject
-from PyQt5.QtWidgets import QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem
-from PyQt5.QtGui import QPen, QBrush, QColor
-from models.device import NetworkDevice  # Change to absolute
+from PyQt5.QtWidgets import QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem, QGraphicsItemGroup
+from PyQt5.QtGui import QPen, QBrush, QColor, QIcon, QPixmap, QPainter, QFont
+from PyQt5.QtCore import Qt, QRectF, QPointF
+import uuid
+
+class DeviceItem(QGraphicsItemGroup):
+    """Base class for all network device items in the scene."""
+    
+    def __init__(self, device_type="generic", name=None, parent=None):
+        """Initialize a device item."""
+        super().__init__(parent)
+        
+        # Device properties
+        self.device_type = device_type
+        self.properties = {
+            'id': str(uuid.uuid4()),
+            'name': name or f"{device_type.capitalize()} Device",
+            'description': "",
+            'ip_address': "",
+            'mac_address': "",
+            'status': "active",
+        }
+        
+        # Device dimensions
+        self.width = 60
+        self.height = 60
+        
+        # Initialize ports
+        self.ports = []
+        self._init_ports()
+        
+        # Set flags for interaction
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        
+        # Create visual representation
+        self._create_visual_representation()
+    
+    def _init_ports(self):
+        """Initialize device ports."""
+        # Default implementation: 4 ports (N, E, S, W)
+        self.ports = [
+            {'name': 'Port 1', 'position': 'north', 'connected': False},
+            {'name': 'Port 2', 'position': 'east', 'connected': False},
+            {'name': 'Port 3', 'position': 'south', 'connected': False},
+            {'name': 'Port 4', 'position': 'west', 'connected': False}
+        ]
+    
+    def _create_visual_representation(self):
+        """Create the visual representation of the device."""
+        from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
+        
+        # Create body rectangle
+        self.body = QGraphicsRectItem(0, 0, self.width, self.height)
+        self.body.setPen(QPen(Qt.black, 1))
+        self.body.setBrush(QColor(200, 200, 255, 180))
+        self.addToGroup(self.body)
+        
+        # Create label
+        self.label = QGraphicsTextItem(self.properties['name'])
+        font = QFont()
+        font.setPointSize(8)
+        self.label.setFont(font)
+        
+        # Center the label beneath the device
+        label_width = self.label.boundingRect().width()
+        label_x = (self.width - label_width) / 2
+        self.label.setPos(label_x, self.height + 5)
+        self.addToGroup(self.label)
+        
+        # Create port indicators
+        self._create_port_indicators()
+    
+    def _create_port_indicators(self):
+        """Create visual indicators for ports."""
+        from PyQt5.QtWidgets import QGraphicsEllipseItem
+        
+        # Port size
+        port_size = 6
+        half_port = port_size / 2
+        
+        # Create port indicators based on port positions
+        for port in self.ports:
+            if port['position'] == 'north':
+                x = self.width / 2 - half_port
+                y = -half_port
+            elif port['position'] == 'east':
+                x = self.width - half_port
+                y = self.height / 2 - half_port
+            elif port['position'] == 'south':
+                x = self.width / 2 - half_port
+                y = self.height - half_port
+            elif port['position'] == 'west':
+                x = -half_port
+                y = self.height / 2 - half_port
+            else:
+                continue  # Skip unknown port positions
+            
+            port_indicator = QGraphicsEllipseItem(x, y, port_size, port_size)
+            port_indicator.setPen(QPen(Qt.black, 1))
+            port_indicator.setBrush(QColor(255, 255, 200))
+            port_indicator.setToolTip(port['name'])
+            
+            # Store reference to the indicator in the port
+            port['indicator'] = port_indicator
+            self.addToGroup(port_indicator)
+    
+    def get_port_position(self, port_name):
+        """Get the scene position of a port by name."""
+        for port in self.ports:
+            if port['name'] == port_name:
+                if 'indicator' in port:
+                    # Get center of the port indicator
+                    indicator = port['indicator']
+                    port_rect = indicator.rect()
+                    port_center = QPointF(
+                        port_rect.x() + port_rect.width() / 2,
+                        port_rect.y() + port_rect.height() / 2
+                    )
+                    # Convert to scene coordinates
+                    return self.mapToScene(port_center)
+        
+        # Default to center if port not found
+        return self.mapToScene(QPointF(self.width / 2, self.height / 2))
+    
+    def get_closest_port(self, scene_pos):
+        """Get the closest port to a scene position."""
+        closest_port = None
+        min_distance = float('inf')
+        
+        for port in self.ports:
+            if 'indicator' in port:
+                # Get center of the port indicator
+                indicator = port['indicator']
+                port_rect = indicator.rect()
+                port_center = QPointF(
+                    port_rect.x() + port_rect.width() / 2,
+                    port_rect.y() + port_rect.height() / 2
+                )
+                port_scene_pos = self.mapToScene(port_center)
+                
+                # Calculate distance
+                dx = port_scene_pos.x() - scene_pos.x()
+                dy = port_scene_pos.y() - scene_pos.y()
+                distance = (dx * dx + dy * dy) ** 0.5
+                
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_port = port
+        
+        return closest_port
+    
+    def itemChange(self, change, value):
+        """Handle item changes."""
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            # Update connected connections
+            self.update_connections()
+            
+            # Update label position if needed
+            if hasattr(self, 'label'):
+                label_width = self.label.boundingRect().width()
+                label_x = (self.width - label_width) / 2
+                self.label.setPos(label_x, self.height + 5)
+        
+        return super().itemChange(change, value)
+    
+    def update_connections(self):
+        """Update any connections attached to this device."""
+        scene = self.scene()
+        if scene:
+            for item in scene.items():
+                if hasattr(item, 'update_path') and hasattr(item, 'source_device') and hasattr(item, 'target_device'):
+                    if item.source_device == self or item.target_device == self:
+                        item.update_path()
+
+
+class RouterDevice(DeviceItem):
+    """Router device item."""
+    
+    def __init__(self, name=None, parent=None):
+        """Initialize a router device item."""
+        super().__init__(device_type="router", name=name, parent=parent)
+    
+    def _create_visual_representation(self):
+        """Create the visual representation of the router."""
+        from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsTextItem, QGraphicsPolygonItem
+        from PyQt5.QtGui import QPolygonF
+        
+        # Create body polygon (router shape)
+        polygon = QPolygonF()
+        polygon.append(QPointF(self.width / 2, 0))           # Top
+        polygon.append(QPointF(self.width, self.height / 3))  # Right top
+        polygon.append(QPointF(self.width, 2 * self.height / 3))  # Right bottom
+        polygon.append(QPointF(self.width / 2, self.height))  # Bottom
+        polygon.append(QPointF(0, 2 * self.height / 3))       # Left bottom
+        polygon.append(QPointF(0, self.height / 3))           # Left top
+        
+        self.body = QGraphicsPolygonItem(polygon)
+        self.body.setPen(QPen(Qt.black, 1))
+        self.body.setBrush(QColor(200, 255, 200, 180))  # Light green
+        self.addToGroup(self.body)
+        
+        # Create label
+        self.label = QGraphicsTextItem(self.properties['name'])
+        font = QFont()
+        font.setPointSize(8)
+        self.label.setFont(font)
+        
+        # Center the label beneath the device
+        label_width = self.label.boundingRect().width()
+        label_x = (self.width - label_width) / 2
+        self.label.setPos(label_x, self.height + 5)
+        self.addToGroup(self.label)
+        
+        # Create port indicators
+        self._create_port_indicators()
+
+
+class SwitchDevice(DeviceItem):
+    """Switch device item."""
+    
+    def __init__(self, name=None, parent=None):
+        """Initialize a switch device item."""
+        super().__init__(device_type="switch", name=name, parent=parent)
+    
+    def _init_ports(self):
+        """Initialize device ports with more ports for a switch."""
+        self.ports = [
+            {'name': 'Port 1', 'position': 'north', 'connected': False},
+            {'name': 'Port 2', 'position': 'north-east', 'connected': False},
+            {'name': 'Port 3', 'position': 'east', 'connected': False},
+            {'name': 'Port 4', 'position': 'south-east', 'connected': False},
+            {'name': 'Port 5', 'position': 'south', 'connected': False},
+            {'name': 'Port 6', 'position': 'south-west', 'connected': False},
+            {'name': 'Port 7', 'position': 'west', 'connected': False},
+            {'name': 'Port 8', 'position': 'north-west', 'connected': False},
+        ]
+    
+    def _create_visual_representation(self):
+        """Create the visual representation of the switch."""
+        from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
+        
+        # Create body rectangle (a bit wider for a switch)
+        self.width = 70  # Make switch wider than generic device
+        self.body = QGraphicsRectItem(0, 0, self.width, self.height)
+        self.body.setPen(QPen(Qt.black, 1))
+        self.body.setBrush(QColor(200, 230, 255, 180))  # Light blue
+        self.addToGroup(self.body)
+        
+        # Create label
+        self.label = QGraphicsTextItem(self.properties['name'])
+        font = QFont()
+        font.setPointSize(8)
+        self.label.setFont(font)
+        
+        # Center the label beneath the device
+        label_width = self.label.boundingRect().width()
+        label_x = (self.width - label_width) / 2
+        self.label.setPos(label_x, self.height + 5)
+        self.addToGroup(self.label)
+        
+        # Create port indicators
+        self._create_port_indicators()
+    
+    def _create_port_indicators(self):
+        """Create visual indicators for ports."""
+        from PyQt5.QtWidgets import QGraphicsEllipseItem
+        
+        # Port size
+        port_size = 6
+        half_port = port_size / 2
+        
+        # Create port indicators based on port positions
+        for port in self.ports:
+            if port['position'] == 'north':
+                x = self.width / 2 - half_port
+                y = -half_port
+            elif port['position'] == 'north-east':
+                x = self.width * 0.75 - half_port
+                y = -half_port
+            elif port['position'] == 'east':
+                x = self.width - half_port
+                y = self.height / 2 - half_port
+            elif port['position'] == 'south-east':
+                x = self.width * 0.75 - half_port
+                y = self.height - half_port
+            elif port['position'] == 'south':
+                x = self.width / 2 - half_port
+                y = self.height - half_port
+            elif port['position'] == 'south-west':
+                x = self.width * 0.25 - half_port
+                y = self.height - half_port
+            elif port['position'] == 'west':
+                x = -half_port
+                y = self.height / 2 - half_port
+            elif port['position'] == 'north-west':
+                x = self.width * 0.25 - half_port
+                y = -half_port
+            else:
+                continue  # Skip unknown port positions
+            
+            port_indicator = QGraphicsEllipseItem(x, y, port_size, port_size)
+            port_indicator.setPen(QPen(Qt.black, 1))
+            port_indicator.setBrush(QColor(255, 255, 200))
+            port_indicator.setToolTip(port['name'])
+            
+            # Store reference to the indicator in the port
+            port['indicator'] = port_indicator
+            self.addToGroup(port_indicator)
+
+
+class ServerDevice(DeviceItem):
+    """Server device item."""
+    
+    def __init__(self, name=None, parent=None):
+        """Initialize a server device item."""
+        super().__init__(device_type="server", name=name, parent=parent)
+        
+        # Adjust dimensions for server
+        self.width = 50
+        self.height = 80
+    
+    def _create_visual_representation(self):
+        """Create the visual representation of the server."""
+        from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsTextItem, QGraphicsLineItem
+        
+        # Create body rectangle (taller for a server)
+        self.body = QGraphicsRectItem(0, 0, self.width, self.height)
+        self.body.setPen(QPen(Qt.black, 1))
+        self.body.setBrush(QColor(255, 230, 200, 180))  # Light orange
+        self.addToGroup(self.body)
+        
+        # Add server rack lines
+        line_spacing = 10
+        num_lines = int(self.height / line_spacing) - 1
+        
+        for i in range(1, num_lines + 1):
+            y = i * line_spacing
+            line = QGraphicsLineItem(0, y, self.width, y)
+            line.setPen(QPen(Qt.gray, 0.5))
+            self.addToGroup(line)
+        
+        # Create label
+        self.label = QGraphicsTextItem(self.properties['name'])
+        font = QFont()
+        font.setPointSize(8)
+        self.label.setFont(font)
+        
+        # Center the label beneath the device
+        label_width = self.label.boundingRect().width()
+        label_x = (self.width - label_width) / 2
+        self.label.setPos(label_x, self.height + 5)
+        self.addToGroup(self.label)
+        
+        # Create port indicators
+        self._create_port_indicators()
+
+
+class ClientDevice(DeviceItem):
+    """Client device (PC/Workstation) item."""
+    
+    def __init__(self, name=None, parent=None):
+        """Initialize a client device item."""
+        super().__init__(device_type="client", name=name, parent=parent)
+    
+    def _init_ports(self):
+        """Initialize device ports with fewer ports for a client."""
+        self.ports = [
+            {'name': 'Port 1', 'position': 'east', 'connected': False},
+            {'name': 'Port 2', 'position': 'south', 'connected': False},
+            {'name': 'Port 3', 'position': 'west', 'connected': False},
+        ]
+    
+    def _create_visual_representation(self):
+        """Create the visual representation of the client device."""
+        from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsTextItem, QGraphicsEllipseItem
+        
+        # Create monitor
+        monitor_width = self.width
+        monitor_height = self.height * 0.6
+        self.monitor = QGraphicsRectItem(0, 0, monitor_width, monitor_height)
+        self.monitor.setPen(QPen(Qt.black, 1))
+        self.monitor.setBrush(QColor(255, 200, 255, 180))  # Light purple
+        self.addToGroup(self.monitor)
+        
+        # Create screen
+        screen_margin = 3
+        screen_width = monitor_width - 2 * screen_margin
+        screen_height = monitor_height - 2 * screen_margin
+        self.screen = QGraphicsRectItem(
+            screen_margin, 
+            screen_margin, 
+            screen_width, 
+            screen_height
+        )
+        self.screen.setPen(QPen(Qt.black, 0.5))
+        self.screen.setBrush(QColor(230, 230, 255, 180))  # Light blue for screen
+        self.addToGroup(self.screen)
+        
+        # Create base
+        base_width = monitor_width * 0.6
+        base_height = self.height * 0.15
+        base_x = (monitor_width - base_width) / 2
+        base_y = monitor_height
+        self.base = QGraphicsRectItem(base_x, base_y, base_width, base_height)
+        self.base.setPen(QPen(Qt.black, 1))
+        self.base.setBrush(QColor(200, 200, 200, 180))  # Gray
+        self.addToGroup(self.base)
+        
+        # Create base support
+        support_width = base_width * 0.8
+        support_height = self.height * 0.25
+        support_x = (monitor_width - support_width) / 2
+        support_y = base_y + base_height
+        self.support = QGraphicsRectItem(support_x, support_y, support_width, support_height)
+        self.support.setPen(QPen(Qt.black, 1))
+        self.support.setBrush(QColor(180, 180, 180, 180))  # Darker gray
+        self.addToGroup(self.support)
+        
+        # Create label
+        self.label = QGraphicsTextItem(self.properties['name'])
+        font = QFont()
+        font.setPointSize(8)
+        self.label.setFont(font)
+        
+        # Center the label beneath the device
+        label_width = self.label.boundingRect().width()
+        label_x = (self.width - label_width) / 2
+        self.label.setPos(label_x, self.height + 5)
+        self.addToGroup(self.label)
+        
+        # Create port indicators
+        self._create_port_indicators()
+
+
+from PyQt5.QtWidgets import QGraphicsItem
+from PyQt5.QtCore import QPointF
+
+# Use absolute imports for models
+try:
+    from src.models.device_item import DeviceItem
+    from src.models.specialized_devices.router_device import RouterDevice
+    from src.models.specialized_devices.switch_device import SwitchDevice
+    from src.models.specialized_devices.server_device import ServerDevice
+    from src.models.specialized_devices.client_device import ClientDevice
+except ImportError:
+    # Fallback to relative imports if absolute imports fail
+    from ..models.device_item import DeviceItem
+    from ..models.specialized_devices.router_device import RouterDevice
+    from ..models.specialized_devices.switch_device import SwitchDevice
+    from ..models.specialized_devices.server_device import ServerDevice
+    from ..models.specialized_devices.client_device import ClientDevice
+
+import uuid
+from PyQt5.QtCore import QObject
 
 class DeviceManager(QObject):
-    """Manages network devices on the canvas."""
+    """Manages device creation, modification and deletion."""
     
-    def __init__(self, scene):
-        """Initialize the device manager with a QGraphicsScene."""
+    def __init__(self, scene=None):
+        """Initialize the device manager."""
         super().__init__()
+        self.devices = {}  # Dictionary of device_id -> device
         self.scene = scene
-        self.devices = []  # Track all devices
+        self.connection_manager = None  # Will be set by MainWindow
+        self.view_factory = None  # Will be set by MainWindow
+    
+    def create_device(self, device_type, x=0, y=0):
+        """Create a new device of specified type.
         
-    def create_device(self, device_type, x, y, properties=None):
-        """Create a new device at the specified location."""
-        try:
-            print(f"Creating device of type {device_type} at position ({x}, {y})")
+        Args:
+            device_type: Type of device (router, switch, etc.)
+            x: X position in scene
+            y: Y position in scene
             
-            # Store exact creation coordinates
-            click_x = x
-            click_y = y
-            
-            # Create the device
-            from models.device import NetworkDevice
-            device = NetworkDevice(device_type, click_x, click_y)
-            
-            # Add to scene
-            self.scene.addItem(device)
-            
-            # Set device properties
-            properties = properties or {}
-            default_name = f"{device_type.capitalize()}-{len(self.devices) + 1}"
-            properties['name'] = properties.get('name', default_name)
-            
-            for key, value in properties.items():
-                if hasattr(device, 'update_property'):
-                    device.update_property(key, value)
-            
-            # Store in the device list
-            self.devices.append(device)
-            
-            print(f"Created device label with name: {properties.get('name')}")
-            return device
+        Returns:
+            The created device object
+        """
+        from src.models.device_item import DeviceItem
         
-        except Exception as e:
-            print(f"Error creating device: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        # Generate unique ID
+        device_id = str(uuid.uuid4())
         
-    def get_device_at(self, scene_pos, margin=10):
-        """Find a device at the given position."""
-        for device in self.devices:
-            rect = device.sceneBoundingRect()
-            # Expand the rect by the margin
-            rect.adjust(-margin, -margin, margin, margin)
-            if rect.contains(scene_pos):
-                return device
-        return None
+        # Create the device model
+        device = DeviceItem(
+            device_id=device_id,
+            device_type=device_type,
+            x=x,
+            y=y,
+            name=f"{device_type.capitalize()}-{device_id[:4]}"
+        )
         
+        # Add to collection
+        self.devices[device_id] = device
+        
+        print(f"Device created: {device_type} at ({x}, {y})")
+        
+        # Create view if factory exists
+        if self.view_factory:
+            device_view = self.view_factory.create_device_view(device)
+            device.view = device_view
+        elif self.scene:
+            # Fallback for direct scene management
+            from src.views.device_view import DeviceView
+            device_view = DeviceView(device)
+            self.scene.addItem(device_view)
+            device.view = device_view
+            
+        return device
+    
     def remove_device(self, device):
-        """Remove a device and all its connections from the scene."""
-        if device not in self.devices:
-            print(f"Device not found for removal")
-            return False
+        """Remove a device and its connections."""
+        if isinstance(device, str):
+            # If passed an id
+            device = self.get_device_by_id(device)
+        
+        if device and device.id in self.devices:
+            # Remove from scene if view exists
+            if device.view and self.scene:
+                self.scene.removeItem(device.view)
+            # For old code compatibility
+            elif hasattr(device, 'scene') and device.scene():
+                self.scene.removeItem(device)
             
-        try:
-            # Remove connections first
-            if hasattr(self, 'connection_manager') and self.connection_manager:
-                # If we have a reference to connection manager
-                connections_to_remove = []
-                for conn in self.connection_manager.connections:
-                    if conn.source_device is device or conn.target_device is device:
-                        connections_to_remove.append(conn)
-                        
-                for conn in connections_to_remove:
-                    self.scene.removeItem(conn)
-                    self.connection_manager.connections.remove(conn)
-            
-            # Now remove the device itself
-            self.scene.removeItem(device)
-            self.devices.remove(device)
-            print(f"Removed device: {device.properties.get('name', 'unnamed')}")
+            # Remove from collection
+            del self.devices[device.id]
             return True
-        except Exception as e:
-            print(f"Error removing device: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
+        
+        return False
     
-    def get_devices_at_position(self, position, device_type=None):
-        """Get all devices at the given position, optionally filtered by type."""
-        devices = []
-        items = self.scene.items(position)
+    def get_device_by_id(self, device_id):
+        """Get a device by its ID."""
+        return self.devices.get(device_id)
+    
+    def get_device_at_pos(self, scene_pos):
+        """Get the device at a scene position."""
+        if not self.scene:
+            return None
+            
+        items = self.scene.items(scene_pos)
+        
         for item in items:
-            if isinstance(item, NetworkDevice):
-                if device_type is None or item.device_type == device_type:
-                    devices.append(item)
-        return devices
+            # Find the device view
+            for device in self.devices.values():
+                if hasattr(device, 'view') and device.view == item:
+                    return device
+            
+            # For backward compatibility
+            if hasattr(item, 'device_type'):
+                return item
+        
+        return None
     
-    def get_all_devices(self, device_type=None):
-        """Get all devices, optionally filtered by type."""
-        if device_type is None:
-            return self.devices
-        return [d for d in self.devices if d.device_type == device_type]
-
-    def device_mouse_press(self, device, event):
-        """Handle mouse press on a device."""
-        # Store the initial position of the device
-        device._drag_start_pos = device.pos()
-        # Call the parent class's mousePressEvent
-        super(NetworkDevice, device).mousePressEvent(event)
-        # Bring this device to the front
-        device.setZValue(100)  # Higher z values are drawn on top
-
-    def device_mouse_move(self, device, event):
-        """Handle mouse movement during device drag."""
-        # Call the parent class's mouseMoveEvent
-        super(NetworkDevice, device).mouseMoveEvent(event)
-        # Update the label position
-        self.position_label(device)
-
-    def device_mouse_release(self, device, event):
-        """Handle mouse release after device drag."""
-        # Call the parent class's mouseReleaseEvent
-        super(NetworkDevice, device).mouseReleaseEvent(event)
-        # Reset the z-value to normal
-        device.setZValue(1)
-        # Make sure label position is updated
-        self.position_label(device)
+    def get_devices_by_type(self, device_type):
+        """Get all devices of a specific type."""
+        return [d for d in self.devices.values() if d.device_type == device_type]
+    
+    # Add compatibility methods for the rest of the API used in current code
+    def get_port_at_pos(self, scene_pos, max_distance=10):
+        """Get the device port at or near a specific scene position."""
+        # Find device at

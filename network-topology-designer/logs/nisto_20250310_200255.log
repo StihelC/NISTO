@@ -1,0 +1,13 @@
+2025-03-10 20:02:55,692 - nisto - INFO - Starting Network Topology Designer
+2025-03-10 20:02:56,192 - nisto - ERROR - Unhandled exception in main
+Traceback (most recent call last):
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/main.py", line 63, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/main.py", line 54, in main
+    main_window = MainWindow()
+                  ^^^^^^^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/controllers/main_window.py", line 76, in __init__
+    self.canvas_controller = CanvasController(
+                             ^^^^^^^^^^^^^^^^^
+TypeError: CanvasController.__init__() got an unexpected keyword argument 'scene'

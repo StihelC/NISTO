@@ -1,10 +1,17 @@
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QHBoxLayout,
-    QLineEdit, QComboBox, QPushButton, QLabel, 
-    QDialogButtonBox, QWidget, QApplication, QSizePolicy, QTextEdit  # Add QSizePolicy and QTextEdit here
+    QDialog, 
+    QVBoxLayout, 
+    QHBoxLayout, 
+    QLabel, 
+    QPushButton, 
+    QLineEdit, 
+    QFormLayout, 
+    QGridLayout,
+    QGroupBox, 
+    QToolButton
 )
-from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtCore import Qt, QSize
 import os
 
 try:
@@ -30,182 +37,161 @@ except ImportError:
                 pass
 
 class DeviceSelectionDialog(QDialog):
-    """Dialog for selecting device type and properties."""
-    
-    DEVICE_TYPES = [
-        "router", "switch", "firewall", "server", 
-        "workstation", "cloud", "database", "wireless"
-    ]
-    
-    def __init__(self, parent=None, device=None):
-        super().__init__(parent)
+    def __init__(self, parent=None):
+        super(DeviceSelectionDialog, self).__init__(parent)
+        self.setWindowTitle("Add Network Device")
+        self.setMinimumWidth(400)
+        self.setMinimumHeight(350)
         
-        # Store reference to existing device (for editing)
-        self.device = device
+        # Initialize device registry
+        self.device_registry = DeviceRegistry()
         
-        # Set window title and modal behavior
-        if device:
-            self.setWindowTitle("Edit Device")
-        else:
-            self.setWindowTitle("Add Device")
+        # Try to create placeholder icons, but don't let it crash the app
+        try:
+            self.device_registry.create_placeholder_icons()
+        except Exception as e:
+            print(f"Error creating placeholder icons: {e}")
+            # Continue without icons
         
-        self.setModal(True)  # Make dialog modal
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)  # Keep on top
-        
-        # Set size
-        self.resize(400, 300)  # Larger size for better visibility
+        # Initialize device selection
+        self.selected_device_type = None
+        self.device_buttons = {}
         
         # Set up the UI
         self.setup_ui()
-        
-        # Use a timer to ensure the dialog appears
-        QTimer.singleShot(100, self.ensure_visible)
     
-    def ensure_visible(self):
-        """Ensure the dialog is visible and active."""
-        self.raise_()  # Bring to front
-        self.activateWindow()  # Activate window
-        
     def setup_ui(self):
-        """Set up the dialog UI."""
-        # Main layout
-        main_layout = QVBoxLayout()
-        self.setLayout(main_layout)
-        
-        # Device type selection with preview
-        type_layout = QHBoxLayout()
-        
-        # Left side: type selector
-        type_form = QFormLayout()
-        self.type_combo = QComboBox()
-        
-        # Populate combo box
-        for device_type in self.DEVICE_TYPES:
-            self.type_combo.addItem(device_type.capitalize())
-        
-        # Connect change event
-        self.type_combo.currentIndexChanged.connect(self.update_preview)
-        
-        type_form.addRow("Device Type:", self.type_combo)
-        
-        # Right side: icon preview
-        self.preview_label = QLabel()
-        self.preview_label.setFixedSize(64, 64)
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setStyleSheet("border: 1px solid #cccccc; background-color: white;")
-        
-        type_layout.addLayout(type_form)
-        type_layout.addWidget(self.preview_label)
-        
-        main_layout.addLayout(type_layout)
-        
-        # Add a line separator
-        line = QWidget()
-        line.setFixedHeight(1)
-        line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        line.setStyleSheet("background-color: #cccccc;")
-        main_layout.addWidget(line)
-        
-        # Device properties
-        properties_group = QWidget()
-        properties_layout = QFormLayout(properties_group)
-        
-        # Device name
-        self.name_edit = QLineEdit()
-        if self.device and hasattr(self.device, 'properties') and 'name' in self.device.properties:
-            self.name_edit.setText(self.device.properties['name'])
-        else:
-            # Auto-generate a name based on type
-            self.name_edit.setText(f"{self.DEVICE_TYPES[0].capitalize()}-1")
+        """Create the dialog UI with device icons."""
+        try:
+            main_layout = QVBoxLayout()
             
-        properties_layout.addRow("Name:", self.name_edit)
-        
-        # IP Address
-        self.ip_edit = QLineEdit()
-        if self.device and hasattr(self.device, 'properties') and 'ip_address' in self.device.properties:
-            self.ip_edit.setText(self.device.properties['ip_address'])
-        properties_layout.addRow("IP Address:", self.ip_edit)
-        
-        # Description
-        self.desc_edit = QTextEdit()
-        self.desc_edit.setMaximumHeight(100)
-        if self.device and hasattr(self.device, 'properties') and 'description' in self.device.properties:
-            self.desc_edit.setText(self.device.properties['description'])
-        properties_layout.addRow("Description:", self.desc_edit)
-        
-        main_layout.addWidget(properties_group)
-        
-        # Spacer
-        main_layout.addStretch(1)
-        
-        # Standard buttons
-        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.button_box.accepted.connect(self.accept)
-        self.button_box.rejected.connect(self.reject)
-        main_layout.addWidget(self.button_box)
-        
-        # Ensure only one connection for accept/reject
-        self.button_box.accepted.disconnect() if self.button_box.receivers(self.button_box.accepted) > 0 else None
-        self.button_box.rejected.disconnect() if self.button_box.receivers(self.button_box.rejected) > 0 else None
-        
-        # Reconnect once
-        self.button_box.accepted.connect(self.accept)
-        self.button_box.rejected.connect(self.reject)
-        
-        # Update the preview
-        self.update_preview()
-        
-        # If editing an existing device, set current type
-        if self.device and hasattr(self.device, 'device_type'):
+            # Device type selection group
+            device_group = QGroupBox("Select Device Type")
+            device_layout = QGridLayout()
+            
+            # Get device types from registry
             try:
-                index = [t.lower() for t in self.DEVICE_TYPES].index(self.device.device_type.lower())
-                self.type_combo.setCurrentIndex(index)
-                # Also update the name
-                if hasattr(self.device, 'properties') and 'name' in self.device.properties:
-                    self.name_edit.setText(self.device.properties['name'])
-            except (ValueError, AttributeError) as e:
-                print(f"Error setting device type: {e}")
+                device_types = self.device_registry.get_device_types()
+            except Exception as e:
+                print(f"Error getting device types: {e}")
+                device_types = [
+                    {"type": "router", "name": "Router"},
+                    {"type": "switch", "name": "Switch"}
+                ]
+            
+            # Create a button with icon for each device type
+            row, col = 0, 0
+            max_cols = 3  # 3 columns in the grid
+            
+            for device in device_types:
+                try:
+                    # Create device button with vertical layout
+                    device_button = QToolButton()
+                    device_button.setText(device["name"])
+                    device_button.setToolTip(device.get("name", device.get("type", "")))
+                    device_button.setCheckable(True)
+                    device_button.setMinimumSize(80, 80)
+                    device_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+                    
+                    # Try to load icon if available
+                    icon_path = device.get("icon_path")
+                    if icon_path and os.path.exists(icon_path):
+                        icon = QIcon(icon_path)
+                        if not icon.isNull():
+                            device_button.setIcon(icon)
+                            device_button.setIconSize(QSize(48, 48))
+                    
+                    # Connect button to selection handler
+                    device_info = device  # Create a local copy for the lambda
+                    device_button.clicked.connect(lambda checked, d=device_info: self.on_device_selected(d))
+                    
+                    # Add to layout and store reference
+                    device_layout.addWidget(device_button, row, col)
+                    self.device_buttons[device["type"]] = device_button
+                    
+                    # Update grid position
+                    col += 1
+                    if col >= max_cols:
+                        col = 0
+                        row += 1
+                except Exception as e:
+                    print(f"Error creating button for device {device.get('type', 'unknown')}: {e}")
+                    continue
+                    
+            device_group.setLayout(device_layout)
+            main_layout.addWidget(device_group)
+            
+            # Device properties form
+            props_group = QGroupBox("Device Properties")
+            form_layout = QFormLayout()
+            
+            # Device name
+            self.name_edit = QLineEdit()
+            form_layout.addRow("Name:", self.name_edit)
+            
+            # IP Address
+            self.ip_edit = QLineEdit()
+            form_layout.addRow("IP Address:", self.ip_edit)
+            
+            # Description
+            self.desc_edit = QLineEdit()
+            form_layout.addRow("Description:", self.desc_edit)
+            
+            props_group.setLayout(form_layout)
+            main_layout.addWidget(props_group)
+            
+            # Buttons
+            button_layout = QHBoxLayout()
+            self.ok_button = QPushButton("Add Device")
+            self.ok_button.setEnabled(False)  # Disabled until device selected
+            self.ok_button.clicked.connect(self.accept)
+            
+            self.cancel_button = QPushButton("Cancel")
+            self.cancel_button.clicked.connect(self.reject)
+            
+            button_layout.addWidget(self.ok_button)
+            button_layout.addWidget(self.cancel_button)
+            main_layout.addLayout(button_layout)
+            
+            self.setLayout(main_layout)
+        except Exception as e:
+            print(f"Error setting up device dialog UI: {e}")
+            # Create a minimal UI that won't crash
+            minimal_layout = QVBoxLayout()
+            minimal_layout.addWidget(QLabel("Error loading device selection. Please try again."))
+            
+            self.cancel_button = QPushButton("Close")
+            self.cancel_button.clicked.connect(self.reject)
+            minimal_layout.addWidget(self.cancel_button)
+            
+            self.setLayout(minimal_layout)
     
-    def update_preview(self):
-        """Update the icon preview based on selected type."""
-        device_type = self.get_device_type().lower()
+    def on_device_selected(self, device_info):
+        """Handle device type selection."""
+        # Uncheck all buttons
+        for button in self.device_buttons.values():
+            button.setChecked(False)
         
-        # Try to find the icon
-        from utils.resource_path import get_resource_path
-        icon_path = get_resource_path(f"resources/device_icons/{device_type}.png")
+        # Check the selected button
+        self.device_buttons[device_info["type"]].setChecked(True)
         
-        if os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path)
-            if not pixmap.isNull():
-                pixmap = pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.preview_label.setPixmap(pixmap)
-                return
-                
-        # If icon not found, show text
-        self.preview_label.setText(device_type.capitalize())
+        # Store the selection
+        self.selected_device_type = device_info["type"]
+        
+        # Update the name with a default
+        if not self.name_edit.text():
+            self.name_edit.setText(f"{device_info['name']}-1")
+        
+        # Enable the OK button
+        self.ok_button.setEnabled(True)
     
-    def get_device_type(self):
-        """Get the selected device type."""
-        index = self.type_combo.currentIndex()
-        if 0 <= index < len(self.DEVICE_TYPES):
-            return self.DEVICE_TYPES[index]
-        return "router"  # Default
-    
-    def get_device_name(self):
-        """Get the entered device name."""
-        name = self.name_edit.text()
-        if not name:
-            # If empty, generate a default name
-            device_type = self.get_device_type()
-            name = f"{device_type.capitalize()}-1"
-        return name
-    
-    def get_device_properties(self):
-        """Get all entered device properties."""
+    def get_device_info(self):
+        """Return the selected device information."""
         return {
-            "name": self.get_device_name(),
-            "ip_address": self.ip_edit.text(),
-            "description": self.desc_edit.toPlainText()
+            "type": self.selected_device_type,
+            "name": self.name_edit.text(),
+            "ip": self.ip_edit.text(),
+            "description": self.desc_edit.text()
         }
     
     @classmethod
@@ -215,7 +201,7 @@ class DeviceSelectionDialog(QDialog):
         result = dialog.exec_()
         
         if result == QDialog.Accepted:
-            device_info = dialog.get_device_properties()
+            device_info = dialog.get_device_info()
             # Explicitly ensure dialog is deleted
             dialog.deleteLater()  
             return device_info
@@ -225,13 +211,6 @@ class DeviceSelectionDialog(QDialog):
         return None
 
     def accept(self):
-        """Override accept to validate inputs."""
-        # Perform any validation here
-        device_name = self.get_device_name()
-        if not device_name:
-            QApplication.beep()
-            self.name_edit.setFocus()
-            return
-        
-        # Validation passed, accept the dialog
+        """Override accept to validate before closing."""
+        # You can add validation here if needed
         super().accept()
