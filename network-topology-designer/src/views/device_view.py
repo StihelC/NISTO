@@ -1,46 +1,58 @@
 from PyQt5.QtWidgets import QGraphicsItemGroup, QGraphicsRectItem, QGraphicsTextItem
-from PyQt5.QtCore import Qt, QRectF, QPointF
-from PyQt5.QtGui import QPen, QBrush, QColor, QFont
+from PyQt5.QtCore import Qt, QPointF, QRectF
+from PyQt5.QtGui import QPen, QBrush, QColor, QFont, QPixmap
 
 class DeviceView(QGraphicsItemGroup):
     """Visual representation of a network device."""
     
+    # Device type colors
+    COLORS = {
+        "router": QColor(200, 150, 150),
+        "switch": QColor(150, 200, 150),
+        "server": QColor(150, 150, 200),
+        "client": QColor(200, 200, 150),
+        "cloud": QColor(180, 180, 220),
+        "generic": QColor(200, 200, 200)
+    }
+    
     def __init__(self, device_model):
         """Initialize the device view."""
         super().__init__()
+        
         self.device_model = device_model
         
-        # Set flags
+        # Set graphics item flags
         self.setFlag(QGraphicsItemGroup.ItemIsMovable)
         self.setFlag(QGraphicsItemGroup.ItemIsSelectable)
+        self.setFlag(QGraphicsItemGroup.ItemSendsGeometryChanges)
         
-        # Create visual representation
+        # Create visual elements
         self._create_visual_elements()
         
-        # Set position
+        # Position at model coordinates
         self.setPos(device_model.x, device_model.y)
-    
-    def _create_visual_elements(self):
-        """Create visual elements for the device."""
-        # Create a rectangle for the device
-        rect = QGraphicsRectItem(0, 0, 80, 40)
-        rect.setPen(QPen(QColor(0, 0, 0), 2))
         
-        # Set color based on device type
-        if self.device_model.device_type == "router":
-            rect.setBrush(QBrush(QColor(200, 150, 150)))
-        elif self.device_model.device_type == "switch":
-            rect.setBrush(QBrush(QColor(150, 200, 150)))
-        else:
-            rect.setBrush(QBrush(QColor(150, 150, 200)))
+    def _create_visual_elements(self):
+        """Create the visual representation of this device."""
+        # Get color for this device type
+        device_color = self.COLORS.get(
+            self.device_model.device_type.lower(),
+            self.COLORS["generic"]
+        )
+        
+        # Create main rectangle
+        self.rect = QGraphicsRectItem(0, 0, 80, 50)
+        self.rect.setBrush(QBrush(device_color))
+        self.rect.setPen(QPen(Qt.black, 1))
+        
+        # Create label
+        self.label = QGraphicsTextItem(self.device_model.name)
+        self.label.setPos(10, 15)
+        self.label.setFont(QFont("Arial", 8))
         
         # Add to group
-        self.addToGroup(rect)
-        
-        # Add label
-        label = QGraphicsTextItem(self.device_model.name)
-        label.setPos(10, 10)
-        self.addToGroup(label)
+        self.addToGroup(self.rect)
+        self.addToGroup(self.label)
     
     def show_ports(self, visible=True):
         """Show or hide port indicators."""
@@ -76,15 +88,14 @@ class DeviceView(QGraphicsItemGroup):
                 self.body.setPen(QPen(Qt.black, 1))
     
     def itemChange(self, change, value):
-        """Handle item changes."""
-        if change == QGraphicsItemGroup.ItemPositionChange:
-            # Update model with new position
+        """Handle item changes like position changes."""
+        if change == QGraphicsItemGroup.ItemPositionChange and self.scene():
+            # Update model position when view is moved
             new_pos = value
-            self.device_model.x = new_pos.x()
-            self.device_model.y = new_pos.y()
-            
-            # Update connections
-            self._update_connections()
+            if self.device_model:
+                self.device_model.x = new_pos.x()
+                self.device_model.y = new_pos.y()
+                self.device_model._update_connections()
         
         return super().itemChange(change, value)
     

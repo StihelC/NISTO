@@ -7,33 +7,37 @@ import uuid
 class DeviceItem:
     """Model class for network devices."""
     
-    def __init__(self, device_id, device_type="generic", x=0, y=0, name="Device"):
+    def __init__(self, device_id, device_type="generic", x=0, y=0, name=None):
         """Initialize a device model."""
         self.id = device_id
         self.device_type = device_type
         self.x = x
         self.y = y
-        self.name = name
+        self.name = name or f"{device_type.capitalize()}-{device_id[:4]}"
         self.connections = []
         self.ports = []
         self.view = None  # Will be set when view is created
         
         # Properties dictionary
         self.properties = {
-            'name': name,
+            'name': self.name,
             'type': device_type,
             'status': 'active',
             'ip_address': '',
+            'description': ''
         }
     
-    def set_position(self, x, y):
-        """Set the device position."""
+    def update_position(self, x, y):
+        """Update the device position."""
         self.x = x
         self.y = y
         
         # Update view if it exists
-        if self.view:
+        if self.view and hasattr(self.view, 'setPos'):
             self.view.setPos(x, y)
+            
+        # Update connections
+        self._update_connections()
     
     def add_port(self, port):
         """Add a port to this device."""
@@ -57,3 +61,11 @@ class DeviceItem:
         # Update view if exists
         if self.view:
             self.view.update_from_model()
+    
+    def _update_connections(self):
+        """Update all connections attached to this device."""
+        for connection in self.connections:
+            if hasattr(connection, 'update_position'):
+                connection.update_position()
+            elif connection.view and hasattr(connection.view, 'update_position'):
+                connection.view.update_position()

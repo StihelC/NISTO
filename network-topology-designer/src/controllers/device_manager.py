@@ -1,4 +1,4 @@
-from PyQt5.QtCore import QObject
+from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem, QGraphicsItemGroup
 from PyQt5.QtGui import QPen, QBrush, QColor, QIcon, QPixmap, QPainter, QFont
 from PyQt5.QtCore import Qt, QRectF, QPointF
@@ -457,107 +457,76 @@ import uuid
 from PyQt5.QtCore import QObject
 
 class DeviceManager(QObject):
-    """Manages device creation, modification and deletion."""
+    """Manager for device creation and manipulation."""
+    
+    # Signals
+    device_added = pyqtSignal(object)
+    device_removed = pyqtSignal(str)
+    device_changed = pyqtSignal(object)
     
     def __init__(self, scene=None):
         """Initialize the device manager."""
         super().__init__()
-        self.devices = {}  # Dictionary of device_id -> device
         self.scene = scene
-        self.connection_manager = None  # Will be set by MainWindow
-        self.view_factory = None  # Will be set by MainWindow
+        self.devices = {}
+        self.connection_manager = None
+        self.view_factory = None
     
-    def create_device(self, device_type, x=0, y=0):
-        """Create a new device of specified type.
-        
-        Args:
-            device_type: Type of device (router, switch, etc.)
-            x: X position in scene
-            y: Y position in scene
+    def create_device(self, device_type, x, y):
+        """Create a device of the specified type at the given position."""
+        try:
+            from models.device_item import DeviceItem
             
-        Returns:
-            The created device object
-        """
-        from src.models.device_item import DeviceItem
-        
-        # Generate unique ID
-        device_id = str(uuid.uuid4())
-        
-        # Create the device model
-        device = DeviceItem(
-            device_id=device_id,
-            device_type=device_type,
-            x=x,
-            y=y,
-            name=f"{device_type.capitalize()}-{device_id[:4]}"
-        )
-        
-        # Add to collection
-        self.devices[device_id] = device
-        
-        print(f"Device created: {device_type} at ({x}, {y})")
-        
-        # Create view if factory exists
-        if self.view_factory:
-            device_view = self.view_factory.create_device_view(device)
-            device.view = device_view
-        elif self.scene:
-            # Fallback for direct scene management
-            from src.views.device_view import DeviceView
-            device_view = DeviceView(device)
-            self.scene.addItem(device_view)
-            device.view = device_view
+            # Generate unique ID
+            device_id = str(uuid.uuid4())[:8]
             
-        return device
+            # Create device model
+            device = DeviceItem(
+                device_id=device_id,
+                device_type=device_type,
+                x=x,
+                y=y
+            )
+            
+            # Add to collection
+            self.devices[device_id] = device
+            
+            # Create view if we have scene access or a view factory
+            if self.scene:
+                from views.device_view import DeviceView
+                device_view = DeviceView(device)
+                self.scene.addItem(device_view)
+                device.view = device_view
+                print(f"Added {device_type} at ({x}, {y})")
+            
+            # Emit signal
+            self.device_added.emit(device)
+            
+            return device
+        except Exception as e:
+            import traceback
+            print(f"Error creating device: {e}")
+            traceback.print_exc()
+            return None
     
-    def remove_device(self, device):
-        """Remove a device and its connections."""
-        if isinstance(device, str):
-            # If passed an id
-            device = self.get_device_by_id(device)
-        
-        if device and device.id in self.devices:
-            # Remove from scene if view exists
+    def remove_device(self, device_id):
+        """Remove a device by ID."""
+        if device_id in self.devices:
+            device = self.devices[device_id]
+            
+            # Remove from scene
             if device.view and self.scene:
                 self.scene.removeItem(device.view)
-            # For old code compatibility
-            elif hasattr(device, 'scene') and device.scene():
-                self.scene.removeItem(device)
+            
+            # Remove connections
+            if self.connection_manager:
+                self.connection_manager.remove_device_connections(device)
             
             # Remove from collection
-            del self.devices[device.id]
+            del self.devices[device_id]
+            
+            # Emit signal
+            self.device_removed.emit(device_id)
+            
             return True
-        
         return False
-    
-    def get_device_by_id(self, device_id):
-        """Get a device by its ID."""
-        return self.devices.get(device_id)
-    
-    def get_device_at_pos(self, scene_pos):
-        """Get the device at a scene position."""
-        if not self.scene:
-            return None
-            
-        items = self.scene.items(scene_pos)
-        
-        for item in items:
-            # Find the device view
-            for device in self.devices.values():
-                if hasattr(device, 'view') and device.view == item:
-                    return device
-            
-            # For backward compatibility
-            if hasattr(item, 'device_type'):
-                return item
-        
-        return None
-    
-    def get_devices_by_type(self, device_type):
-        """Get all devices of a specific type."""
-        return [d for d in self.devices.values() if d.device_type == device_type]
-    
-    # Add compatibility methods for the rest of the API used in current code
-    def get_port_at_pos(self, scene_pos, max_distance=10):
-        """Get the device port at or near a specific scene position."""
-        # Find device at

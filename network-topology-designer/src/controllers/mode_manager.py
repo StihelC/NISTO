@@ -208,15 +208,22 @@ class ModeManager(QObject):
             if event.button() == Qt.LeftButton:
                 self.left_button_pressed = True
                 
-                # Get scene position and call handler
+                # Get scene position
                 view = self.get_view()
                 if view:
                     scene_pos = view.mapToScene(event.pos())
-                    return self.handle_mouse_press(event, scene_pos)
+                    # Fix: Call handle_mouse_press with just one parameter
+                    return self.handle_mouse_press(event)  # Remove scene_pos parameter
                 
-            # Rest of the method...
+            elif event.button() == Qt.RightButton:
+                self.right_button_pressed = True
+                
+            elif event.button() == Qt.MiddleButton:
+                self.middle_button_pressed = True
+                
         except Exception as e:
             print(f"Error in _handle_mouse_press: {e}")
+            import traceback
             traceback.print_exc()
             
         return False
@@ -262,54 +269,29 @@ class ModeManager(QObject):
         """Handle key press events."""
         return self.handle_key_press(event)
     
-    def handle_mouse_press(self, event, scene_pos):
-        """Handle mouse press event based on current mode."""
-        if self.current_mode == self.MODE_SELECT:
-            # Default selection behavior
-            self.drag_start_pos = scene_pos
-            return False  # Let the view handle selection
-        
-        elif self.current_mode == self.MODE_ADD_DEVICE:
-            # Add new device at click position
-            self.canvas_controller.add_device(self.current_device_type, scene_pos)
-            return True
-        
-        elif self.current_mode == self.MODE_ADD_CONNECTION:
-            # Start connection if clicked on a device
-            if self.device_manager: 
-                device, port = self.device_manager.get_port_at_pos(scene_pos)
-                if device:
-                    self.source_device = device
-                    self.source_port = port
-                    self.canvas_controller.start_temp_connection(device, port)
+    def handle_mouse_press(self, event):
+        """Handle mouse press based on current mode."""
+        try:
+            # Map to scene position ourselves
+            view = self.get_view()
+            if not view:
+                return False
+                
+            scene_pos = view.mapToScene(event.pos())
+            
+            if self.current_mode == self.MODE_ADD_DEVICE:
+                # Add device at clicked position
+                if hasattr(self.canvas_controller, 'add_device'):
+                    self.canvas_controller.add_device(self.current_device_type, scene_pos)
                     return True
-        
-        elif self.current_mode == self.MODE_ADD_TEXT:
-            # Start drawing boundary rectangle
-            self.drag_start_pos = scene_pos
-            self.canvas_controller.start_temp_rectangle(scene_pos)
-            self.is_dragging = True
-            return True
-        
-        elif self.current_mode == self.MODE_DELETE:
-            # Delete item at click position
-            item = self.canvas_controller.get_item_at(scene_pos)
-            if item:
-                if hasattr(item, 'device_type') and self.device_manager:
-                    self.device_manager.remove_device(item)
-                elif hasattr(item, 'source_device') and self.connection_manager:
-                    self.connection_manager.remove_connection(item)
-                else:
-                    self.scene.removeItem(item)
-            return True
-        
-        elif self.current_mode == self.MODE_ADD_BOUNDARY:
-            # Start drawing boundary rectangle
-            self.drag_start_pos = scene_pos
-            self.canvas_controller.start_temp_rectangle(scene_pos)
-            self.is_dragging = True
-            return True
-        
+                    
+            # Other modes...
+                
+        except Exception as e:
+            print(f"Error in handle_mouse_press: {e}")
+            import traceback
+            traceback.print_exc()
+            
         return False
     
     def handle_mouse_move(self, event, scene_pos):
@@ -404,3 +386,65 @@ class ModeManager(QObject):
         except Exception as e:
             print(f"Error in _pan_view: {e}")
             traceback.print_exc()
+    
+    def handle_mouse_press(self, event):
+        """Handle mouse press events."""
+        try:
+            view = self.get_view()
+            if not view:
+                return False
+                
+            # Map coordinates
+            scene_pos = view.mapToScene(event.pos())
+            
+            # Handle based on current mode
+            if self.current_mode == self.MODE_ADD_DEVICE:
+                # Add device at clicked position
+                device = self.canvas_controller.add_device(self.current_device_type, scene_pos)
+                if device:
+                    # Switch back to select mode after adding
+                    self.set_mode(self.MODE_SELECT)
+                    return True
+                    
+            elif self.current_mode == self.MODE_ADD_CONNECTION:
+                # Get item at position
+                items = view.items(event.pos())
+                for item in items:
+                    # Check if this is a device view
+                    if hasattr(item, 'device_model'):
+                        # If we don't have a source device yet, start connection
+                        if not self.source_device:
+                            self.source_device = item.device_model
+                            self.canvas_controller.start_temp_connection(self.source_device)
+                            return True
+                        # If we already have source, finish connection
+                        else:
+                            result = self.canvas_controller.finish_temp_connection(item.device_model)
+                            self.source_device = None
+                            return result is not None
+            
+            elif self.current_mode == self.MODE_SELECT:
+                # Selection handled by Qt
+                pass
+                
+            elif self.current_mode == self.MODE_DELETE:
+                # Get item at position
+                items = view.items(event.pos())
+                for item in items:
+                    # Check if this is a device view
+                    if hasattr(item, 'device_model'):
+                        device_id = item.device_model.id
+                        self.device_manager.remove_device(device_id)
+                        return True
+                    # Check if this is a connection view  
+                    elif hasattr(item, 'connection_model'):
+                        connection_id = item.connection_model.id
+                        self.connection_manager.remove_connection(connection_id)
+                        return True
+                        
+        except Exception as e:
+            import traceback
+            print(f"Error in handle_mouse_press: {e}")
+            traceback.print_exc()
+            
+        return False

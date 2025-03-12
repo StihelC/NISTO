@@ -1,9 +1,10 @@
-from PyQt5.QtCore import QObject, QPointF, Qt
+from PyQt5.QtCore import QObject, QPointF, Qt, pyqtSignal
 from PyQt5.QtGui import QPen, QColor, QPainterPath, QBrush
 from utils.path_routers import OrthogonalRouter, ManhattanRouter
 import math
 from PyQt5.QtWidgets import QGraphicsPathItem
 from PyQt5.QtCore import Qt, QPointF
+from models.connection import Connection
 
 class ConnectionItem(QGraphicsPathItem):
     """A connection between two network devices."""
@@ -120,64 +121,86 @@ class ConnectionItem(QGraphicsPathItem):
 
 
 class ConnectionManager(QObject):
-    """Manages network connections between devices."""
+    """Manager for connection creation and manipulation."""
     
-    def __init__(self, scene):
-        """Initialize with a scene to manage connections in."""
+    # Signals
+    connection_added = pyqtSignal(object)
+    connection_removed = pyqtSignal(str)
+    connection_changed = pyqtSignal(object)
+    
+    def __init__(self, scene=None):
+        """Initialize the connection manager."""
         super().__init__()
         self.scene = scene
-        self.connections = []
-        self.router = OrthogonalRouter()  # Default router
+        self.connections = {}
+        self.device_manager = None
+        self.temp_connection = None
+    
+    def create_connection(self, source_device, target_device, conn_type="standard"):
+        """Create a connection between devices."""
+        try:
+            # Create connection model
+            connection = Connection(source_device, target_device, conn_type)
+            
+            # Add to collection
+            self.connections[connection.id] = connection
+            
+            # Create view if we have a scene
+            if self.scene:
+                from views.connection_view import ConnectionView
+                conn_view = ConnectionView(connection)
+                self.scene.addItem(conn_view)
+                connection.view = conn_view
+                print(f"Created connection between {source_device.name} and {target_device.name}")
+            
+            # Emit signal
+            self.connection_added.emit(connection)
+            
+            return connection
+        except Exception as e:
+            import traceback
+            print(f"Error creating connection: {e}")
+            traceback.print_exc()
+            return None
+    
+    def remove_connection(self, connection_id):
+        """Remove a connection by ID."""
+        if connection_id in self.connections:
+            connection = self.connections[connection_id]
+            
+            # Remove from scene
+            if connection.view and self.scene:
+                self.scene.removeItem(connection.view)
+            
+            # Remove from devices
+            if connection.source_device:
+                connection.source_device.remove_connection(connection)
+            if connection.target_device:
+                connection.target_device.remove_connection(connection)
+            
+            # Remove from collection
+            del self.connections[connection_id]
+            
+            # Emit signal
+            self.connection_removed.emit(connection_id)
+            
+            return True
+        return False
+    
+    def remove_device_connections(self, device):
+        """Remove all connections for a device."""
+        # Create a copy of the list to avoid modification during iteration
+        connections_to_remove = [c for c in self.connections.values() 
+                               if c.source_device == device or c.target_device == device]
+        
+        for connection in connections_to_remove:
+            self.remove_connection(connection.id)
     
     def add_connection(self, connection):
         """Add a connection to the manager."""
         if connection not in self.connections:
             self.connections.append(connection)
         return connection
-    
-    def create_connection(self, source_device, target_device, connection_type="ethernet", 
-                         source_port=None, target_port=None):
-        """Create a new connection between devices."""
-        try:
-            # Prevent connection to self
-            if source_device is target_device:
-                print("Cannot connect a device to itself")
-                return None
-            
-            # Create connection using the ConnectionItem class defined in this file
-            
-            # Create connection using the ConnectionItem class
-            connection = ConnectionItem(
-                source_device, target_device, source_port, target_port
-            )
-            connection.connection_type = connection_type
-            
-            # Add to our list
-            if not hasattr(self, 'connections'):
-                self.connections = []
-            self.connections.append(connection)
-            
-            # Force update
-            self.scene.update()
-            
-            print(f"Created connection: {connection_type} from "
-                  f"{source_device.properties.get('name', 'unnamed')} "
-                  f"(port {source_port or 'center'}) to "
-                  f"{target_device.properties.get('name', 'unnamed')} "
-                  f"(port {target_port or 'center'})")
-            
-            return connection
-        except Exception as e:
-            print(f"Error creating connection: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def remove_connection(self, connection):
-        """Remove a connection."""
-        if connection in self.connections:
-            self.connections.remove(connection)
-            self.scene.removeItem(connection)
     
     def start_connection(self, device, port=None):
         """Start a new connection from the source device and port."""

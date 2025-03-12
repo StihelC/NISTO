@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsItem, QGraphicsRectItem, QApplication, QGraphicsTextItem, QMessageBox
+from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsItem, QGraphicsRectItem, QApplication, QGraphicsTextItem, QMessageBox, QGraphicsLineItem
 from PyQt5.QtCore import Qt, QPointF, QObject, QTimer, QRectF, QSizeF, pyqtSignal
 from PyQt5.QtGui import QPen, QBrush, QColor, QPainter, QFont
 from controllers.device_manager import DeviceManager
@@ -8,25 +8,50 @@ from ui.device_dialog import DeviceSelectionDialog
 from controllers.connection_manager import ConnectionManager
 from src.controllers.connection_tool import ConnectionCreationTool
 
-class CanvasController(QObject):
-    """Controller for the canvas/scene operations."""
+class TopologyScene(QGraphicsScene):
+    def __init__(self):
+        super().__init__()
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+        self.setBackgroundBrush(QColor(255, 255, 255))
     
-    def __init__(self, main_window, view):
-        """Initialize the canvas controller.
+    def drawBackground(self, painter, rect):
+        """Override to draw a plain background instead of a grid."""
+        # Just call the parent method which will fill with the background brush
+        super().drawBackground(painter, rect)
+        
+        # No additional grid drawing code
+
+class CanvasController(QObject):
+    """Controller for managing canvas operations."""
+    
+    def __init__(self, main_window=None, view=None):
+        """Initialize canvas controller.
         
         Args:
-            main_window: The main window of the application
-            view: The QGraphicsView to control
+            main_window: The main window instance
+            view: QGraphicsView to control
         """
-        super().__init__()
+        super().__init__(main_window)  # Set parent for memory management
         
-        # Store references
         self.main_window = main_window
         self.view = view
         
         # Create scene
-        self.scene = QGraphicsScene()
-        self.view.setScene(self.scene)
+        self.scene = TopologyScene()
+        if view:
+            view.setScene(self.scene)
+        
+        # References to other controllers/managers
+        self.device_manager = None
+        self.connection_manager = None
+        self.mode_manager = None
+        
+        # Temporary items for interaction
+        self.temp_connection = None
+        self.temp_rectangle = None
+        self.selected_items = []
+        
+        print("CanvasController initialized successfully")
         
         # Configure view
         self.view.setRenderHint(QPainter.Antialiasing)
@@ -44,13 +69,29 @@ class CanvasController(QObject):
         # Initialize connection tracking attributes
         self.temp_connection = None  # Add this missing attribute
         
-    def _setup_scene(self):
-        """Configure the scene with background, grid, etc."""
-        # Set scene size
-        self.scene.setSceneRect(-5000, -5000, 10000, 10000)
+        # Grid tracking
+        self.grid_visible = False
+        self.grid_items = []
         
-        # Set background
+    def _setup_scene(self):
+        """Configure the scene."""
+        if not self.scene:
+            return
+            
+        # Set scene size
+        self.scene.setSceneRect(-2000, -2000, 4000, 4000)
+        
+        # Use a plain white background
         self.scene.setBackgroundBrush(QColor(255, 255, 255))
+        
+        # IMPORTANT: If you have grid drawing code here, remove it
+        # Look for any code that creates lines or dots and comment it out
+        
+        # Example grid code that might be present and should be removed:
+        # for x in range(-2000, 2000, 50):
+        #     self.scene.addLine(x, -2000, x, 2000, QPen(Qt.gray, 0.5))
+        # for y in range(-2000, 2000, 50):
+        #     self.scene.addLine(-2000, y, 2000, y, QPen(Qt.gray, 0.5))
     
     # --- Override to fix the issue ---
     def mouse_move_event(self, event):
@@ -811,3 +852,122 @@ class CanvasController(QObject):
             print(f"Error adding device: {e}")
             traceback.print_exc()
             return None
+
+    def start_temp_connection(self, source_device):
+        """Start creating a temporary connection from source device."""
+        self.source_device = source_device
+        
+        # Create a temporary line
+        self.temp_connection = QGraphicsLineItem()
+        self.temp_connection.setPen(QPen(QColor(100, 100, 100), 2, Qt.DashLine))
+        
+        # Get source position
+        source_pos = QPointF(source_device.x + 40, source_device.y + 25)
+        
+        # Set initial line position
+        self.temp_connection.setLine(
+            source_pos.x(), source_pos.y(),
+            source_pos.x(), source_pos.y()
+        )
+        
+        # Add to scene
+        self.scene.addItem(self.temp_connection)
+        
+        return self.temp_connection
+    
+    def update_temp_connection(self, target_pos):
+        """Update temporary connection to follow mouse."""
+        if not self.temp_connection or not self.source_device:
+            return
+            
+        # Get source position
+        source_pos = QPointF(self.source_device.x + 40, self.source_device.y + 25)
+        
+        # Update line
+        self.temp_connection.setLine(
+            source_pos.x(), source_pos.y(),
+            target_pos.x(), target_pos.y()
+        )
+    
+    def finish_temp_connection(self, target_device):
+        """Complete the temporary connection to the target device."""
+        if not self.temp_connection or not self.source_device or not target_device:
+            return self.cancel_temp_connection()
+            
+        # Remove temporary line
+        if self.temp_connection:
+            self.scene.removeItem(self.temp_connection)
+            self.temp_connection = None
+        
+        # Create actual connection
+        if self.connection_manager:
+            connection = self.connection_manager.create_connection(
+                self.source_device, target_device)
+            self.source_device = None
+            return connection
+        
+        return None
+    
+    def cancel_temp_connection(self):
+        """Cancel temporary connection creation."""
+        if self.temp_connection:
+            self.scene.removeItem(self.temp_connection)
+            self.temp_connection = None
+        self.source_device = None
+        return True
+
+    def clear_grid(self):
+        """Remove any grid lines from the scene."""
+        if not self.scene:
+            return
+        
+        # Remove any items that might be grid lines
+        grid_items = []
+        for item in self.scene.items():
+            # Check if this item looks like a grid line
+            if isinstance(item, QGraphicsLineItem):
+                # Check if it's a grid line (usually thin, gray, in a regular pattern)
+                pen = item.pen()
+                if pen.width() <= 1 and pen.color() == Qt.gray:
+                    grid_items.append(item)
+        
+        # Remove them all
+        for item in grid_items:
+            self.scene.removeItem(item)
+        
+        print(f"Removed {len(grid_items)} grid lines")
+    
+    def toggle_grid(self, visible):
+        """Toggle grid visibility."""
+        if visible:
+            self.add_grid()
+        else:
+            self.clear_grid()
+    
+    def add_grid(self):
+        """Add a grid to the scene."""
+        self.clear_grid()  # Clear existing grid first
+        
+        if not self.scene:
+            return
+            
+        grid_size = 50
+        grid_color = QColor(230, 230, 230)
+        
+        # Draw vertical lines
+        for x in range(-1000, 1000, grid_size):
+            line = QGraphicsLineItem(x, -1000, x, 1000)
+            line.setPen(Qt.gray)
+            line.setZValue(-1)  # Put grid behind other items
+            self.scene.addItem(line)
+            self.grid_items.append(line)
+        
+        # Draw horizontal lines
+        for y in range(-1000, 1000, grid_size):
+            line = QGraphicsLineItem(-1000, y, 1000, y)
+            line.setPen(Qt.gray)
+            line.setZValue(-1)  # Put grid behind other items
+            self.scene.addItem(line)
+            self.grid_items.append(line)
+        
+        self.grid_visible = True

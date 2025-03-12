@@ -5,48 +5,32 @@ from PyQt5.QtCore import Qt, QRectF, QPointF
 class ViewManager:
     """Manages view operations such as zoom, pan, and view transformations."""
     
-    def __init__(self, main_window, view, scene):
+    def __init__(self, main_window, view, scene, canvas_controller=None):
         """Initialize the view manager."""
         self.main_window = main_window
         self.view = view
         self.scene = scene
+        self.canvas_controller = canvas_controller
         
-        # Set up the view
-        self.view.setRenderHint(1)  # Antialiasing
-        self.view.setDragMode(QGraphicsView.RubberBandDrag)
-        self.view.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.view.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
-        
-        # Zoom settings
-        self.zoom_factor = 1.2
-        self.min_zoom = 0.1
-        self.max_zoom = 5.0
+        # Initialize view settings
         self.current_zoom = 1.0
+        self.zoom_factor = 1.25
+        self.min_zoom = 0.25
+        self.max_zoom = 4.0
         
-        # Add background elements
-        self._add_grid()
+        # Set up view
+        self._setup_view()
+    
+    def _setup_view(self):
+        """Set up the view."""
+        # No need to add grid here - let canvas_controller handle it
         self._add_border()
     
-    def _add_grid(self):
-        """Add a background grid to the scene."""
-        grid_size = 50
-        grid_color = QColor(230, 230, 230)
-        
-        # Draw vertical lines
-        for x in range(-1000, 1000, grid_size):
-            line = self.scene.addLine(x, -1000, x, 1000, QPen(grid_color))
-            line.setZValue(-1)  # Put grid behind other items
-        
-        # Draw horizontal lines
-        for y in range(-1000, 1000, grid_size):
-            line = self.scene.addLine(-1000, y, 1000, y, QPen(grid_color))
-            line.setZValue(-1)  # Put grid behind other items
-        
-        # Add coordinate axis
-        x_axis = self.scene.addLine(-1000, 0, 1000, 0, QPen(Qt.red, 1))
-        y_axis = self.scene.addLine(0, -1000, 0, 1000, QPen(Qt.green, 1))
-        x_axis.setZValue(-0.5)
-        y_axis.setZValue(-0.5)
+    # Remove or comment out the _add_grid method, or modify it to use canvas_controller:
+    # def _add_grid(self):
+    #     """Add a background grid to the scene."""
+    #     if self.canvas_controller:
+    #         self.canvas_controller.add_grid()
     
     def _add_border(self):
         """Add a border to the scene."""
