@@ -470,12 +470,17 @@ class DeviceManager(QObject):
         self.scene = scene
         self.devices = {}
         self.connection_manager = None
-        self.view_factory = None
+        self.resource_manager = None  # Will be set by MainWindow
     
+    def set_resource_manager(self, resource_manager):
+        """Set the resource manager."""
+        self.resource_manager = resource_manager
+
     def create_device(self, device_type, x, y):
         """Create a device of the specified type at the given position."""
         try:
             from models.device_item import DeviceItem
+            from views.device_view import DeviceView
             
             # Generate unique ID
             device_id = str(uuid.uuid4())[:8]
@@ -491,16 +496,13 @@ class DeviceManager(QObject):
             # Add to collection
             self.devices[device_id] = device
             
-            # Create view if we have scene access or a view factory
+            # Create view
             if self.scene:
-                from views.device_view import DeviceView
-                device_view = DeviceView(device)
+                # Pass resource manager if available
+                device_view = DeviceView(device, self.resource_manager)
                 self.scene.addItem(device_view)
                 device.view = device_view
                 print(f"Added {device_type} at ({x}, {y})")
-            
-            # Emit signal
-            self.device_added.emit(device)
             
             return device
         except Exception as e:

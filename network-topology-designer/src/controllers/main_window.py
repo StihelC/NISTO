@@ -9,6 +9,8 @@ from controllers.connection_manager import ConnectionManager
 from src.controllers.view_manager import ViewManager
 from src.controllers.mode_manager import ModeManager
 from src.controllers.file_manager import FileManager
+from controllers.resource_manager import ResourceManager
+from dialogs.device_dialog import DeviceSelectionDialog
 
 class MainWindow(QMainWindow):
     """Main window for the Network Topology Designer application."""
@@ -72,6 +74,14 @@ class MainWindow(QMainWindow):
             self.device_manager,
             self.connection_manager
         )
+        
+        # Create resource manager
+        print("Creating resource manager...")
+        self.resource_manager = ResourceManager()
+        
+        # Pass to device manager
+        if hasattr(self.device_manager, 'set_resource_manager'):
+            self.device_manager.set_resource_manager(self.resource_manager)
         
         # Set up UI components
         self._setup_menubar()
@@ -188,6 +198,12 @@ class MainWindow(QMainWindow):
         self.toggle_grid_action.setChecked(False)  # Start with grid off
         self.toggle_grid_action.triggered.connect(self._toggle_grid)
         self.main_toolbar.addAction(self.toggle_grid_action)
+        
+        # Add device button
+        self.add_device_btn = QAction("Add Device", self)
+        self.add_device_btn.setIcon(QIcon.fromTheme("list-add"))
+        self.add_device_btn.triggered.connect(self.show_add_device_dialog)
+        self.main_toolbar.addAction(self.add_device_btn)
     
     def _setup_statusbar(self):
         """Create status bar."""
@@ -217,4 +233,30 @@ class MainWindow(QMainWindow):
         """Toggle grid visibility."""
         if hasattr(self.canvas_controller, 'toggle_grid'):
             self.canvas_controller.toggle_grid(self.toggle_grid_action.isChecked())
+
+    def _add_device_from_dialog(self):
+        """Show device selection dialog and add selected device."""
+        device_type = DeviceSelectionDialog.get_device_type(self)
+        
+        if device_type:
+            # Tell mode manager to use this device type
+            self.mode_manager.current_device_type = device_type
+            self.mode_manager.set_mode(self.mode_manager.MODE_ADD_DEVICE)
+            
+            # Show status message
+            self.statusBar().showMessage(f"Click on canvas to add {device_type}", 3000)
+
+    def show_add_device_dialog(self):
+        """Show dialog to select device type."""
+        from dialogs.device_dialog import DeviceSelectionDialog
+        
+        device_type = DeviceSelectionDialog.get_device_type(self)
+        
+        if device_type:
+            # Set mode manager to add this device type
+            self.mode_manager.current_device_type = device_type
+            self.mode_manager.set_mode(self.mode_manager.MODE_ADD_DEVICE)
+            
+            # Show status message
+            self.statusBar().showMessage(f"Click to add {device_type}", 3000)
 

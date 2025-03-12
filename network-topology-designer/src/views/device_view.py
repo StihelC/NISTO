@@ -1,25 +1,27 @@
-from PyQt5.QtWidgets import QGraphicsItemGroup, QGraphicsRectItem, QGraphicsTextItem
+from PyQt5.QtWidgets import QGraphicsItemGroup, QGraphicsPixmapItem, QGraphicsTextItem, QGraphicsRectItem
 from PyQt5.QtCore import Qt, QPointF, QRectF
 from PyQt5.QtGui import QPen, QBrush, QColor, QFont, QPixmap
 
 class DeviceView(QGraphicsItemGroup):
     """Visual representation of a network device."""
     
-    # Device type colors
+    # Fallback colors if icons aren't available
     COLORS = {
         "router": QColor(200, 150, 150),
         "switch": QColor(150, 200, 150),
         "server": QColor(150, 150, 200),
         "client": QColor(200, 200, 150),
+        "firewall": QColor(220, 150, 150),
         "cloud": QColor(180, 180, 220),
         "generic": QColor(200, 200, 200)
     }
     
-    def __init__(self, device_model):
+    def __init__(self, device_model, resource_manager=None):
         """Initialize the device view."""
         super().__init__()
         
         self.device_model = device_model
+        self.resource_manager = resource_manager
         
         # Set graphics item flags
         self.setFlag(QGraphicsItemGroup.ItemIsMovable)
@@ -34,25 +36,39 @@ class DeviceView(QGraphicsItemGroup):
         
     def _create_visual_elements(self):
         """Create the visual representation of this device."""
-        # Get color for this device type
-        device_color = self.COLORS.get(
-            self.device_model.device_type.lower(),
-            self.COLORS["generic"]
-        )
+        # Default size
+        self.width = 80
+        self.height = 60
         
-        # Create main rectangle
-        self.rect = QGraphicsRectItem(0, 0, 80, 50)
-        self.rect.setBrush(QBrush(device_color))
-        self.rect.setPen(QPen(Qt.black, 1))
+        # Try to use icon if resource manager is available
+        icon_item = None
+        if self.resource_manager:
+            pixmap = self.resource_manager.get_device_pixmap(
+                self.device_model.device_type,
+                size=(60, 40)
+            )
+            if pixmap and not pixmap.isNull():
+                # Create icon item
+                icon_item = QGraphicsPixmapItem(pixmap)
+                icon_item.setPos(10, 5)
+                self.addToGroup(icon_item)
         
-        # Create label
-        self.label = QGraphicsTextItem(self.device_model.name)
-        self.label.setPos(10, 15)
-        self.label.setFont(QFont("Arial", 8))
+        # If no icon, use colored rectangle
+        if not icon_item:
+            rect_color = self.COLORS.get(
+                self.device_model.device_type.lower(), 
+                self.COLORS["generic"]
+            )
+            rect_item = QGraphicsRectItem(0, 0, self.width, self.height)
+            rect_item.setBrush(QBrush(rect_color))
+            rect_item.setPen(QPen(Qt.black, 1))
+            self.addToGroup(rect_item)
         
-        # Add to group
-        self.addToGroup(self.rect)
-        self.addToGroup(self.label)
+        # Add label below the icon/rectangle
+        label = QGraphicsTextItem(self.device_model.name)
+        label.setPos(5, self.height + 5)
+        label.setFont(QFont("Arial", 8))
+        self.addToGroup(label)
     
     def show_ports(self, visible=True):
         """Show or hide port indicators."""
@@ -95,7 +111,10 @@ class DeviceView(QGraphicsItemGroup):
             if self.device_model:
                 self.device_model.x = new_pos.x()
                 self.device_model.y = new_pos.y()
-                self.device_model._update_connections()
+                
+                # Update connections if the model has a method for it
+                if hasattr(self.device_model, '_update_connections'):
+                    self.device_model._update_connections()
         
         return super().itemChange(change, value)
     
@@ -146,3 +165,13 @@ class DeviceView(QGraphicsItemGroup):
                     closest_port = port
         
         return closest_port, min_distance
+    
+    def paint(self, painter, option, widget):
+        """Custom painting for selection indication."""
+        # Let the group items paint themselves
+        super().paint(painter, option, widget)
+        
+        # Draw selection indicator if selected
+        if self.isSelected():
+            painter.setPen(QPen(Qt.blue, 2, Qt.DashLine))
+            painter.drawRect(self.boundingRect().adjusted(2, 2, -2, -2))
