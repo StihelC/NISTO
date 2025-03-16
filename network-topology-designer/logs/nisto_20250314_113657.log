@@ -1,5 +1,0 @@
-2025-03-14 11:36:58,024 - nisto - INFO - Starting Network Topology Designer
-2025-03-14 11:36:58,477 - nisto - DEBUG - MainWindow: setting up toolbar
-2025-03-14 11:36:58,480 - nisto - DEBUG - MainWindow: toolbar setup complete
-2025-03-14 11:36:58,678 - nisto - INFO - Application window shown
-2025-03-14 11:37:00,487 - nisto - DEBUG - MainWindow: unchecking other buttons except Add Boundary

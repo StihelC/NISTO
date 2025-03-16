@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import QGraphicsItemGroup, QGraphicsPixmapItem, QGraphicsTe
 from PyQt5.QtGui import QPixmap, QFont, QPen, QBrush, QColor, QPainterPath
 import uuid
 import os
-from src.utils.resource_manager import ResourceManager
+from utils.resource_manager import ResourceManager
 
 class Device(QGraphicsItemGroup):
     """Unified device class for network topology.
@@ -411,3 +411,18 @@ class Device(QGraphicsItemGroup):
         outline.setPen(QPen(QColor(0, 120, 215), 1.5, Qt.DashLine))  # Blue dashed line
         outline.setZValue(-1)  # Place behind the device
         return outline
+    
+    def _get_default_properties(self):
+        """Return the default properties for this device type."""
+        if self.device_type in self.DEVICE_PROPERTIES:
+            # Return a copy to avoid modifying the class constants
+            return dict(self.DEVICE_PROPERTIES[self.device_type])
+        else:
+            # Default to generic device properties if type not found
+            return dict(self.DEVICE_PROPERTIES[self.GENERIC])
+    
+    # Simplified version that just returns a basic port count
+    def _get_port_count(self):
+        """Get a basic port count for connection points."""
+        # Just return a simple count - we're using abstract connections
+        return 4  # One for each side (north, east, south, west)

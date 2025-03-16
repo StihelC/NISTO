@@ -1,46 +1,84 @@
+"""
+Utility functions for locating and managing application resources.
+"""
 import os
 import sys
 
-def get_resource_path(relative_path):
-    """Get absolute path to a resource file.
-    
-    This function handles different runtime environments:
-    - Running from source
-    - Running from a PyInstaller package
-    - Running from a pip-installed package
-    """
-    # Check for PyInstaller environment
+def get_base_path():
+    """Get the base directory of the application."""
     if getattr(sys, 'frozen', False):
-        # Running in a PyInstaller bundle
-        base_path = sys._MEIPASS
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        return sys._MEIPASS
     else:
-        # Running in normal Python environment
-        # Get the directory of this script
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # We are running in a normal Python environment
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def get_resource_path(relative_path):
+    """
+    Get absolute path to a resource, works for dev and for PyInstaller.
     
-    # Try multiple possible locations
-    possible_paths = [
-        os.path.join(base_path, relative_path),  # Relative to src
-        os.path.join(os.path.dirname(base_path), relative_path),  # Relative to project root
-        os.path.join(os.path.dirname(os.path.dirname(base_path)), relative_path),  # Up two levels
-        relative_path,  # As provided
-    ]
+    Args:
+        relative_path (str): Path relative to the resources directory
+                             (e.g. "icons/router.png")
+                             
+    Returns:
+        str: Absolute path to the resource
+    """
+    base_path = get_base_path()
     
-    # Return the first path that exists
-    for path in possible_paths:
-        if os.path.exists(path):
-            return path
+    # Check if resources are in the main resources dir
+    resources_path = os.path.join(base_path, "resources")
+    full_path = os.path.join(resources_path, relative_path)
     
-    # If no file found, print debugging info and return the best guess
-    print(f"Resource not found: {relative_path}")
-    print(f"Searched paths: {possible_paths}")
+    if os.path.exists(full_path):
+        return full_path
     
-    # Return the most likely path
-    return possible_paths[0]
+    # Check if resources are in src/resources
+    src_resources_path = os.path.join(base_path, "src", "resources")
+    src_full_path = os.path.join(src_resources_path, relative_path)
+    
+    if os.path.exists(src_full_path):
+        return src_full_path
+    
+    # Return the original path as fallback
+    return full_path
+
+def check_resources_exist():
+    """
+    Check if essential resources exist and report their status.
+    
+    Returns:
+        dict: A dictionary containing resource paths and existence status
+    """
+    resource_files = {
+        "icons": [
+            "router.png",
+            "switch.png",
+            "server.png",
+            "firewall.png",
+            "workstation.png",
+            "cloud.png",
+        ],
+        "styles": [
+            "main.css",
+        ]
+    }
+    
+    results = {}
+    
+    for category, files in resource_files.items():
+        category_results = {}
+        for filename in files:
+            path = get_resource_path(f"{category}/{filename}")
+            exists = os.path.exists(path)
+            category_results[filename] = {"path": path, "exists": exists}
+        results[category] = category_results
+    
+    return results
 
 def list_resources(directory="resources"):
     """List all resource files in the specified directory."""
-    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_path = get_base_path()
     resource_dir = os.path.join(base_path, directory)
     
     resources = []

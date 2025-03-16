@@ -8,7 +8,21 @@ src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 sys.path.insert(0, src_dir)
 
 # Import the main function from the main module
-from main import main
+# The main function should use controllers.main_window
+from controllers.main_window import MainWindow
+from PyQt5.QtWidgets import QApplication
+
+def main():
+    # Create the application instance
+    app = QApplication(sys.argv)
+    app.setApplicationName("Network Topology Designer")
+    
+    # Create and show the main window
+    window = MainWindow()
+    window.show()
+    
+    # Start the event loop
+    return app.exec_()
 
 if __name__ == "__main__":
     sys.exit(main())

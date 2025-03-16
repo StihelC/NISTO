@@ -24,6 +24,7 @@ class MainWindow(QMainWindow):
     """Main window for network topology designer application."""
     
     def __init__(self):
+        print("Starting MainWindow initialization...")
         super().__init__()
         
         # Set up window properties
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         # Status message
         self.statusBar().showMessage("Ready")
         print("MainWindow initialized")
+        print("MainWindow initialization complete")
     
     def _setup_scene_view(self):
         """Set up the scene and view."""
@@ -717,5 +719,10 @@ class MainWindow(QMainWindow):
         
         # Accept the close event
         event.accept()
+    
+    def showEvent(self, event):
+        print("MainWindow show event triggered")
+        super().showEvent(event)
+        print("MainWindow show event completed")
 
 
