@@ -5,7 +5,7 @@ from PyQt5.QtCore import Qt
 class DeviceRegistry:
     """Manages the registry of available device types and their icons."""
     
-    def __init__(self, icons_dir="src/resources/device_icons"):
+    def __init__(self, icons_dir="src/icons/device_icons"):
         """Initialize the registry with the path to device icons."""
         self.icons_dir = self._find_icons_directory(icons_dir)
         self.device_types = self._discover_device_types()

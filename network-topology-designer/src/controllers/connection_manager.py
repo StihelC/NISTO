@@ -246,20 +246,90 @@ class ConnectionItem(QGraphicsPathItem):
 
 
 class ConnectionManager(QObject):
-    """Manages connections between devices in the network topology."""
-    
-    # Signals
+    """
+    Manages connections between network devices.
+    """
     connection_created = pyqtSignal(object)
     connection_removed = pyqtSignal(object)
-    connection_selected = pyqtSignal(object)
-    connection_deselected = pyqtSignal(object)
     
-    def __init__(self, scene=None):
+    def __init__(self, scene):
         """Initialize the connection manager."""
         super().__init__()
+        
         self.scene = scene
-        self.connections = {}  # Dictionary of connections by ID
-        self.selected_connection = None
+        self.connections = []
+        self.source_device = None  # Used during connection creation
+    
+    def start_connection(self, device):
+        """Start creating a connection from a device."""
+        self.source_device = device
+    
+    def complete_connection(self, target_device):
+        """Complete a connection to a target device."""
+        if self.source_device and target_device and self.source_device != target_device:
+            # Create the connection
+            connection = self.create_connection(self.source_device, target_device)
+            
+            # Reset source device
+            self.source_device = None
+            
+            return connection
+        
+        # Reset source device if no valid target
+        self.source_device = None
+        return None
+    
+    def create_connection(self, source_device, target_device, connection_type=None):
+        """Create a connection between two devices."""
+        # First check if connection already exists
+        for connection in self.connections:
+            if ((connection.source_device == source_device and 
+                connection.target_device == target_device) or
+                (connection.source_device == target_device and 
+                connection.target_device == source_device)):
+                # Connection already exists
+                return None
+        
+        # Create new connection
+        connection = Connection(source_device, target_device, connection_type)
+        self.connections.append(connection)
+        
+        # Add the visual line to the scene
+        self.scene.addItem(connection.line_item)
+        
+        # Emit signal
+        self.connection_created.emit(connection)
+        
+        return connection
+    
+    def remove_connection(self, connection):
+        """Remove a connection."""
+        if connection in self.connections:
+            self.connections.remove(connection)
+            connection.remove()
+            self.connection_removed.emit(connection)
+            return True
+        return False
+    
+    def get_connection_at(self, scene_pos, tolerance=5.0):
+        """Find a connection at the given scene position."""
+        for connection in self.connections:
+            line = connection.line_item
+            if line and line.contains(line.mapFromScene(scene_pos)):
+                return connection
+        return None
+    
+    def update_connections(self):
+        """Update all connections."""
+        for connection in self.connections:
+            connection.update_position()
+    
+    def clear(self):
+        """Remove all connections."""
+        # Make a copy of the list since we'll be modifying it during iteration
+        connections_copy = list(self.connections)
+        for connection in connections_copy:
+            self.remove_connection(connection)
     
     def register_connection(self, connection):
         """Register a connection with the manager."""

@@ -27,15 +27,37 @@ class CanvasController(QObject):
         self.selected_device_type = Device.ROUTER  # Default device type
     
     def set_mode(self, mode):
-        """Set the current operation mode."""
-        if mode in [self.SELECT_MODE, self.DEVICE_MODE, self.CONNECTION_MODE, self.BOUNDARY_MODE]:
-            self.mode = mode
-            self.mode_changed.emit(mode)
-            print(f"Canvas mode set to: {mode}")
-            return True
+        """Set the canvas interaction mode."""
+        self.mode = mode
         
-        print(f"Invalid mode: {mode}")
-        return False
+        # Update cursor based on mode
+        if mode == self.MODE_SELECT:
+            self.view.setCursor(Qt.ArrowCursor)
+            self._enable_device_dragging(True)
+        elif mode == self.MODE_DEVICE:
+            self.view.setCursor(Qt.CrossCursor)
+            self._enable_device_dragging(True)
+        elif mode == self.MODE_CONNECT:
+            self.view.setCursor(Qt.PointingHandCursor)
+            self._enable_device_dragging(False)  # Disable dragging in connect mode
+        elif mode == self.MODE_DELETE:
+            self.view.setCursor(Qt.ForbiddenCursor)
+            self._enable_device_dragging(True)
+        
+        # Emit mode changed signal if you have one
+        if hasattr(self, 'mode_changed'):
+            self.mode_changed.emit(mode)
+
+    def _enable_device_dragging(self, enable):
+        """Enable or disable dragging for all devices in the scene."""
+        from PyQt5.QtWidgets import QGraphicsItem
+        from src.models.device import Device
+        
+        # Iterate through all items in the scene
+        for item in self.scene.items():
+            # Check if it's a Device instance
+            if isinstance(item, Device):
+                item.setFlag(QGraphicsItem.ItemIsMovable, enable)
     
     def set_device_type(self, device_type):
         """Set the device type for device creation."""
@@ -49,15 +71,33 @@ class CanvasController(QObject):
         return False
     
     def handle_mouse_press(self, event):
-        """Handle mouse press events based on current mode."""
-        if self.mode == self.DEVICE_MODE:
-            # Create a device at the click location
-            pos = event.scenePos()
-            self.device_manager.create_device(
-                self.selected_device_type,
-                pos.x(),
-                pos.y()
-            )
+        """Handle mouse press events on the canvas."""
+        scene_pos = self.view.mapToScene(event.pos())
+        
+        if self.mode == self.MODE_CONNECT:
+            # Handle connection mode
+            item = self.scene.itemAt(scene_pos, self.view.transform())
+            if item and isinstance(item, Device):
+                # Start connection from this device
+                self.connection_manager.start_connection(item)
+        # ... rest of the method
+    
+    def handle_mouse_release(self, event):
+        """Handle mouse release events on the canvas."""
+        scene_pos = self.view.mapToScene(event.pos())
+        
+        if self.mode == self.MODE_CONNECT:
+            # Complete connection
+            item = self.scene.itemAt(scene_pos, self.view.transform())
+            if item and hasattr(item, 'name'):  # Simple check if it's a device
+                # Complete connection to this device
+                connection = self.connection_manager.complete_connection(item)
+                if connection:
+                    print(f"Created connection from {connection.source_device.name} to {connection.target_device.name}")
+                
+                # Optional: Reset to select mode after creating a connection
+                # self.set_mode(self.MODE_SELECT)
+        # ... rest of the method
     
     def __init__(self, main_window=None, view=None):
         """Initialize canvas controller.

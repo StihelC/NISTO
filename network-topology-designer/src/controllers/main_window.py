@@ -724,5 +724,12 @@ class MainWindow(QMainWindow):
         print("MainWindow show event triggered")
         super().showEvent(event)
         print("MainWindow show event completed")
+    
+    def handle_mode_change(self, mode):
+        """Handle changes to the canvas interaction mode."""
+        self.canvas_controller.set_mode(mode)
+        
+        # Update UI to reflect current mode
+        self.update_mode_ui(mode)
 
 
