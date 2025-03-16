@@ -1,10 +1,10 @@
 # network-topology-designer/src/models/device.py
 from PyQt5.QtCore import QPointF, pyqtSignal, Qt
-from PyQt5.QtWidgets import QGraphicsItemGroup, QGraphicsPixmapItem, QGraphicsTextItem, QGraphicsRectItem
-from PyQt5.QtGui import QPixmap, QFont, QPen, QBrush, QColor
+from PyQt5.QtWidgets import QGraphicsItemGroup, QGraphicsPixmapItem, QGraphicsTextItem, QGraphicsRectItem, QGraphicsItem, QGraphicsPathItem
+from PyQt5.QtGui import QPixmap, QFont, QPen, QBrush, QColor, QPainterPath
 import uuid
 import os
-from utils.resource_manager import ResourceManager
+from src.utils.resource_manager import ResourceManager
 
 class Device(QGraphicsItemGroup):
     """Unified device class for network topology.
@@ -67,14 +67,35 @@ class Device(QGraphicsItemGroup):
         }
     }
     
-    def __init__(self, device_id=None, device_type=GENERIC, name=None, x=0, y=0):
-        """Initialize a device."""
+    def __init__(self, name, device_type):
         super().__init__()
         
-        # Core properties
-        self.id = device_id or str(uuid.uuid4())[:8]
+        # Make sure the device is selectable, movable, and focuses on click
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self.setFlag(QGraphicsItem.ItemIsFocusable, True)
+        
+        # Set acceptable mouse events
+        self.setAcceptHoverEvents(True)
+        
+        # Initialize properties
+        self.name = name
         self.device_type = device_type
-        self.name = name or f"{device_type.capitalize()}-{self.id[-4:]}"
+        self.properties = self._get_default_properties()
+        self.connections = []
+        self.port_count = self._get_port_count()
+        
+        # Create visual components
+        self._build_visual_representation()
+        
+        # Create the selection visual indicator (but keep it hidden initially)
+        self._selection_indicator = self._create_selection_indicator()
+        self.addToGroup(self._selection_indicator)
+        self._selection_indicator.setVisible(False)
+        
+        # Core properties
+        self.id = str(uuid.uuid4())[:8]
         self.width = 60
         self.height = 60
         
@@ -85,17 +106,15 @@ class Device(QGraphicsItemGroup):
         
         # Connection points/ports
         self.ports = []
-        self.connections = []
         
         # Base properties for all devices
-        self.properties = {
+        self.properties.update({
             'id': self.id,
-            'name': self.name,
             'description': "",
             'ip_address': "",
             'mac_address': "",
             'status': "active",
-        }
+        })
         
         # Add device-specific properties
         if device_type in self.DEVICE_PROPERTIES:
@@ -105,18 +124,13 @@ class Device(QGraphicsItemGroup):
                     self.properties[key] = value
         
         # Set position
-        self.setPos(x, y)
-        
-        # Set flags
-        self.setFlag(QGraphicsItemGroup.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItemGroup.ItemIsMovable, True)
-        self.setFlag(QGraphicsItemGroup.ItemSendsGeometryChanges, True)
+        self.setPos(0, 0)
         
         # Create visual representation
         self._create_visual()
         self._init_ports()
         
-        print(f"Device created: {self.name} ({self.device_type}) at position ({x}, {y})")
+        print(f"Device created: {self.name} ({self.device_type}) at position (0, 0)")
     
     @classmethod
     def create(cls, device_type, x=0, y=0, name=None):
@@ -131,7 +145,8 @@ class Device(QGraphicsItemGroup):
             name = f"{device_type.capitalize()}-{device_id[-4:]}"
         
         # Create the device with the proper type
-        device = cls(device_id, device_type, name, x, y)
+        device = cls(name, device_type)
+        device.setPos(x, y)
         return device
     
     def _create_visual(self):
@@ -237,6 +252,21 @@ class Device(QGraphicsItemGroup):
             if hasattr(self, 'selection_changed'):
                 self.selection_changed.emit(self, bool(value))
         
+        elif change == QGraphicsItem.ItemSelectedChange:
+            if value:
+                # Item is being selected
+                if hasattr(self, '_selection_indicator'):
+                    self._selection_indicator.setVisible(True)
+            else:
+                # Item is being deselected
+                if hasattr(self, '_selection_indicator'):
+                    self._selection_indicator.setVisible(False)
+                    
+        elif change == QGraphicsItem.ItemPositionHasChanged:
+            # Item has moved - update connections if any
+            for connection in self.connections:
+                connection.updatePosition()
+                
         return super().itemChange(change, value)
     
     def update_property(self, key, value):
@@ -338,12 +368,11 @@ class Device(QGraphicsItemGroup):
     def from_dict(cls, data):
         """Create device from dictionary (deserialization)."""
         device = cls(
-            device_id=data['id'],
-            device_type=data['type'],
             name=data['name'],
-            x=data['x'],
-            y=data['y']
+            device_type=data['type']
         )
+        device.id = data['id']
+        device.setPos(data['x'], data['y'])
         
         # Update properties
         if 'properties' in data:
@@ -356,3 +385,29 @@ class Device(QGraphicsItemGroup):
     def get_available_types(cls):
         """Return list of available device types."""
         return list(cls.DEVICE_PROPERTIES.keys())
+    
+    def mouseDoubleClickEvent(self, event):
+        """Handle double-click events (could be used to edit properties)"""
+        super().mouseDoubleClickEvent(event)
+        # Optional: Emit a signal or perform an action on double-click
+        
+    def mousePressEvent(self, event):
+        """Handle mouse press events"""
+        # Ensure the item gets focus and is selected on click
+        self.setFocus()
+        super().mousePressEvent(event)
+    
+    def _create_selection_indicator(self):
+        """Create and return a visual indicator for when the device is selected"""
+        # Create a slightly larger rectangle/ellipse around the device
+        path = QPainterPath()
+        bounds = self.boundingRect()
+        # Add a small padding around the device
+        padding = 5
+        rect = bounds.adjusted(-padding, -padding, padding, padding)
+        path.addRect(rect)
+        
+        outline = QGraphicsPathItem(path)
+        outline.setPen(QPen(QColor(0, 120, 215), 1.5, Qt.DashLine))  # Blue dashed line
+        outline.setZValue(-1)  # Place behind the device
+        return outline

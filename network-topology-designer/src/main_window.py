@@ -3,10 +3,9 @@ Main Window Controller for Network Topology Designer
 """
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QFileDialog
 from PyQt5.QtCore import Qt, QSettings
-from src.ui.network_topo import NetworkTopoUI  # Adjusted import path
 from src.controllers.canvas_controller import CanvasController
 from src.controllers.device_manager import DeviceManager
-from src.controllers.file_handler import FileHandler
+from src.controllers.file_manager import FileHandler
 
 class MainWindow(QMainWindow):
     """
@@ -23,7 +22,6 @@ class MainWindow(QMainWindow):
         self.file_handler = FileHandler(self.device_manager, self.canvas_controller)
         
         # Set up the UI
-        self.ui = NetworkTopoUI(self)
         self.setCentralWidget(self.ui.central_widget)
         
         # Connect signals to slots
