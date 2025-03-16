@@ -1,0 +1,16 @@
+2025-03-14 14:24:46,723 - nisto - INFO - Starting Network Topology Designer
+2025-03-14 14:24:47,074 - nisto - ERROR - Unhandled exception in main
+Traceback (most recent call last):
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/main.py", line 61, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/main.py", line 52, in main
+    main_window = MainWindow()
+                  ^^^^^^^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/controllers/main_window.py", line 36, in __init__
+    self.canvas_controller = CanvasController(self, self.view)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/controllers/canvas_controller.py", line 87, in __init__
+    self.scene = TopologyScene(self)
+                 ^^^^^^^^^^^^^^^^^^^
+TypeError: TopologyScene.__init__() takes 1 positional argument but 2 were given

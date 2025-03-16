@@ -440,74 +440,57 @@ from PyQt5.QtCore import QPointF
 
 # Use absolute imports for models
 try:
-    from src.models.device_item import DeviceItem
-    from src.models.specialized_devices.router_device import RouterDevice
-    from src.models.specialized_devices.switch_device import SwitchDevice
-    from src.models.specialized_devices.server_device import ServerDevice
-    from src.models.specialized_devices.client_device import ClientDevice
+    from src.models.device import Device
+
 except ImportError:
     # Fallback to relative imports if absolute imports fail
-    from ..models.device_item import DeviceItem
-    from ..models.specialized_devices.router_device import RouterDevice
-    from ..models.specialized_devices.switch_device import SwitchDevice
-    from ..models.specialized_devices.server_device import ServerDevice
-    from ..models.specialized_devices.client_device import ClientDevice
+    from ..models.device import Device
 
 import uuid
 from PyQt5.QtCore import QObject
 
 class DeviceManager(QObject):
-    """Manager for device creation and manipulation."""
+    """Manages the creation and tracking of devices in the network topology."""
     
     # Signals
     device_added = pyqtSignal(object)
-    device_removed = pyqtSignal(str)
-    device_changed = pyqtSignal(object)
+    device_removed = pyqtSignal(object)
+    device_selected = pyqtSignal(object)
     
     def __init__(self, scene=None):
-        """Initialize the device manager."""
         super().__init__()
+        self.devices = {}  # Dictionary of devices by ID
         self.scene = scene
-        self.devices = {}
-        self.connection_manager = None
-        self.resource_manager = None  # Will be set by MainWindow
+        self.selected_device = None
+        self.selected_device_type = Device.ROUTER  # Default device type
     
-    def set_resource_manager(self, resource_manager):
-        """Set the resource manager."""
-        self.resource_manager = resource_manager
-
-    def create_device(self, device_type, x, y):
+    def create_device(self, device_type, x, y, name=None):
         """Create a device of the specified type at the given position."""
         try:
-            from models.device_item import DeviceItem
-            from views.device_view import DeviceView
+            # Use the Device class factory method
+            device = Device.create(device_type, x, y, name)
             
-            # Generate unique ID
-            device_id = str(uuid.uuid4())[:8]
+            # Add to devices dictionary
+            self.devices[device.id] = device
             
-            # Create device model
-            device = DeviceItem(
-                device_id=device_id,
-                device_type=device_type,
-                x=x,
-                y=y
-            )
-            
-            # Add to collection
-            self.devices[device_id] = device
-            
-            # Create view
+            # Add to scene if available
             if self.scene:
-                # Pass resource manager if available
-                device_view = DeviceView(device, self.resource_manager)
-                self.scene.addItem(device_view)
-                device.view = device_view
-                print(f"Added {device_type} at ({x}, {y})")
+                self.scene.addItem(device)
+                
+                # Connect device signals
+                device.selection_changed.connect(self._handle_device_selection)
+                
+                print(f"Created {device_type} at ({x}, {y})")
+            else:
+                print("Warning: No scene available to add device")
+            
+            # Emit signal
+            self.device_added.emit(device)
             
             return device
         except Exception as e:
-            import traceback
             print(f"Error creating device: {e}")
+            import traceback
             traceback.print_exc()
             return None
     
@@ -517,18 +500,47 @@ class DeviceManager(QObject):
             device = self.devices[device_id]
             
             # Remove from scene
-            if device.view and self.scene:
-                self.scene.removeItem(device.view)
+            if self.scene and device in self.scene.items():
+                self.scene.removeItem(device)
             
-            # Remove connections
-            if self.connection_manager:
-                self.connection_manager.remove_device_connections(device)
-            
-            # Remove from collection
+            # Remove from dictionary
             del self.devices[device_id]
             
-            # Emit signal
-            self.device_removed.emit(device_id)
+            # Update selected device if needed
+            if self.selected_device and self.selected_device.id == device_id:
+                self.selected_device = None
             
+            # Emit signal
+            self.device_removed.emit(device)
+            
+            print(f"Removed device: {device_id}")
             return True
+        
+        return False
+    
+    def _handle_device_selection(self, device, is_selected):
+        """Handle device selection changes."""
+        if is_selected:
+            self.selected_device = device
+            self.device_selected.emit(device)
+            print(f"Selected device: {device.name}")
+        elif self.selected_device == device:
+            self.selected_device = None
+    
+    def get_device_by_id(self, device_id):
+        """Get a device by ID."""
+        return self.devices.get(device_id)
+    
+    def get_devices_by_type(self, device_type):
+        """Get all devices of a specific type."""
+        return [d for d in self.devices.values() if d.device_type == device_type]
+    
+    def set_selected_device_type(self, device_type):
+        """Set the currently selected device type for creation."""
+        if device_type in Device.get_available_types():
+            self.selected_device_type = device_type
+            print(f"Selected device type: {device_type}")
+            return True
+        
+        print(f"Unknown device type: {device_type}")
         return False

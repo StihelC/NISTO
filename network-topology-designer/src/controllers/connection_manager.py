@@ -2,9 +2,134 @@ from PyQt5.QtCore import QObject, QPointF, Qt, pyqtSignal
 from PyQt5.QtGui import QPen, QColor, QPainterPath, QBrush
 from utils.path_routers import OrthogonalRouter, ManhattanRouter
 import math
-from PyQt5.QtWidgets import QGraphicsPathItem
+from PyQt5.QtWidgets import QGraphicsPathItem, QGraphicsLineItem, QGraphicsEllipseItem
 from PyQt5.QtCore import Qt, QPointF
 from models.connection import Connection
+from models.device import Device
+import uuid
+
+class Connection(QGraphicsPathItem):
+    """A connection between two devices."""
+    
+    def __init__(self, source_device, source_port, target_device, target_port, connection_type="standard"):
+        """Initialize a connection between two devices."""
+        super().__init__()
+        
+        # Generate a unique ID
+        self.id = str(uuid.uuid4())[:8]
+        
+        # Store connection details
+        self.source_device = source_device
+        self.source_port = source_port
+        self.target_device = target_device
+        self.target_port = target_port
+        self.connection_type = connection_type
+        
+        # Set appearance
+        self.setPen(QPen(QColor(0, 0, 0), 2, Qt.SolidLine))
+        self.setZValue(-1)  # Draw behind devices
+        
+        # Draw the connection
+        self.update_path()
+        
+        # Connect to device signals
+        self.source_device.position_changed.connect(self.update_path)
+        self.target_device.position_changed.connect(self.update_path)
+        
+    def update_path(self):
+        """Update the connection path based on device positions."""
+        try:
+            # Get port positions
+            source_pos = self.source_device.get_port_position(self.source_port['name'])
+            target_pos = self.target_device.get_port_position(self.target_port['name'])
+            
+            # Create a curved path between ports
+            path = QPainterPath()
+            path.moveTo(source_pos)
+            
+            # Calculate control points for curve
+            # Midpoint between devices
+            mid_x = (source_pos.x() + target_pos.x()) / 2
+            mid_y = (source_pos.y() + target_pos.y()) / 2
+            
+            # Distance between points
+            dx = target_pos.x() - source_pos.x()
+            dy = target_pos.y() - source_pos.y()
+            distance = math.sqrt(dx*dx + dy*dy)
+            
+            # Create curved path with more pronounced curve for longer distances
+            curve_factor = min(50, distance / 4)
+            
+            # Calculate normal vector to the line
+            if abs(dx) < 1 and abs(dy) < 1:
+                # Points are too close, use a simple line
+                path.lineTo(target_pos)
+            else:
+                # Normalize the direction vector
+                length = math.sqrt(dx*dx + dy*dy)
+                nx = -dy / length
+                ny = dx / length
+                
+                # Control points perpendicular to the line
+                ctrl1 = QPointF(source_pos.x() + dx/3 + nx*curve_factor,
+                              source_pos.y() + dy/3 + ny*curve_factor)
+                ctrl2 = QPointF(source_pos.x() + 2*dx/3 + nx*curve_factor,
+                              source_pos.y() + 2*dy/3 + ny*curve_factor)
+                
+                path.cubicTo(ctrl1, ctrl2, target_pos)
+            
+            # Set the path
+            self.setPath(path)
+            
+        except Exception as e:
+            print(f"Error updating connection path: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def cleanup(self):
+        """Disconnect signals to prevent memory leaks."""
+        try:
+            # Disconnect from device signals
+            if self.source_device:
+                self.source_device.position_changed.disconnect(self.update_path)
+            if self.target_device:
+                self.target_device.position_changed.disconnect(self.update_path)
+        except Exception as e:
+            print(f"Error cleaning up connection: {e}")
+    
+    def to_dict(self):
+        """Convert connection to dictionary for serialization."""
+        return {
+            'id': self.id,
+            'source_device_id': self.source_device.id,
+            'source_port_name': self.source_port['name'],
+            'target_device_id': self.target_device.id,
+            'target_port_name': self.target_port['name'],
+            'connection_type': self.connection_type
+        }
+    
+    @classmethod
+    def from_dict(cls, data, device_manager):
+        """Create connection from dictionary (deserialization)."""
+        # Get devices from device manager
+        source_device = device_manager.get_device_by_id(data['source_device_id'])
+        target_device = device_manager.get_device_by_id(data['target_device_id'])
+        
+        if not source_device or not target_device:
+            print(f"Error creating connection: device not found")
+            return None
+        
+        # Find ports
+        source_port = next((p for p in source_device.ports if p['name'] == data['source_port_name']), None)
+        target_port = next((p for p in target_device.ports if p['name'] == data['target_port_name']), None)
+        
+        if not source_port or not target_port:
+            print(f"Error creating connection: port not found")
+            return None
+        
+        # Create connection
+        return cls(source_device, source_port, target_device, target_port, data.get('connection_type', 'standard'))
+
 
 class ConnectionItem(QGraphicsPathItem):
     """A connection between two network devices."""
@@ -121,20 +246,564 @@ class ConnectionItem(QGraphicsPathItem):
 
 
 class ConnectionManager(QObject):
-    """Manager for connection creation and manipulation."""
+    """Manages connections between devices in the network topology."""
     
     # Signals
-    connection_added = pyqtSignal(object)
-    connection_removed = pyqtSignal(str)
-    connection_changed = pyqtSignal(object)
+    connection_created = pyqtSignal(object)
+    connection_removed = pyqtSignal(object)
+    connection_selected = pyqtSignal(object)
+    connection_deselected = pyqtSignal(object)
     
     def __init__(self, scene=None):
         """Initialize the connection manager."""
         super().__init__()
         self.scene = scene
-        self.connections = {}
-        self.device_manager = None
-        self.temp_connection = None
+        self.connections = {}  # Dictionary of connections by ID
+        self.selected_connection = None
+    
+    def register_connection(self, connection):
+        """Register a connection with the manager."""
+        if not isinstance(connection, ConnectionItem):
+            print("Error: Connection must be a ConnectionItem instance")
+            return False
+        
+        # Add to dictionary
+        self.connections[connection.id] = connection
+        
+        # Emit signal
+        self.connection_created.emit(connection)
+        
+        print(f"Connection registered: {connection.id}")
+        return True
+    
+    def create_connection(self, source_device, source_port, target_device, target_port, connection_type="ethernet"):
+        """Create a new connection between devices."""
+        try:
+            # Create connection item
+            connection = ConnectionItem(
+                source_device,
+                source_port,
+                target_device,
+                target_port,
+                connection_type
+            )
+            
+            # Add to scene
+            if self.scene:
+                self.scene.addItem(connection)
+            
+            # Mark ports as connected
+            source_port["connected"] = True
+            target_port["connected"] = True
+            
+            # Add connection to devices
+            if hasattr(source_device, "add_connection"):
+                source_device.add_connection(connection)
+            if hasattr(target_device, "add_connection"):
+                target_device.add_connection(connection)
+            
+            # Register with manager
+            self.register_connection(connection)
+            
+            return connection
+        
+        except Exception as e:
+            print(f"Error creating connection: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def remove_connection(self, connection_id):
+        """Remove a connection by ID."""
+        if connection_id in self.connections:
+            connection = self.connections[connection_id]
+            
+            # Mark ports as disconnected
+            if connection.source_port:
+                connection.source_port["connected"] = False
+            if connection.target_port:
+                connection.target_port["connected"] = False
+            
+            # Remove from devices
+            if hasattr(connection.source_device, "remove_connection"):
+                connection.source_device.remove_connection(connection)
+            if hasattr(connection.target_device, "remove_connection"):
+                connection.target_device.remove_connection(connection)
+            
+            # Disconnect signals
+            connection.cleanup()
+            
+            # Remove from scene
+            if self.scene and connection.scene() == self.scene:
+                self.scene.removeItem(connection)
+            
+            # Remove from dictionary
+            del self.connections[connection_id]
+            
+            # Reset selected connection if needed
+            if self.selected_connection == connection:
+                self.selected_connection = None
+            
+            # Emit signal
+            self.connection_removed.emit(connection)
+            
+            print(f"Connection removed: {connection_id}")
+            return True
+        
+        return False
+    
+    def remove_device_connections(self, device):
+        """Remove all connections for a device."""
+        connection_ids = []
+        
+        # Find all connections for this device
+        for connection_id, connection in self.connections.items():
+            if connection.source_device == device or connection.target_device == device:
+                connection_ids.append(connection_id)
+        
+        # Remove each connection
+        for connection_id in connection_ids:
+            self.remove_connection(connection_id)
+        
+        return len(connection_ids)
+    
+    def select_connection(self, connection):
+        """Select a connection."""
+        if connection not in self.connections.values():
+            return False
+        
+        # Deselect current selection if any
+        if self.selected_connection and self.selected_connection != connection:
+            old_selected = self.selected_connection
+            self.selected_connection = None
+            self.connection_deselected.emit(old_selected)
+        
+        # Update selection
+        self.selected_connection = connection
+        
+        # Emit signal
+        self.connection_selected.emit(connection)
+        
+        return True
+    
+    def deselect_connection(self):
+        """Deselect the currently selected connection."""
+        if self.selected_connection:
+            old_selected = self.selected_connection
+            self.selected_connection = None
+            self.connection_deselected.emit(old_selected)
+            return True
+        
+        return False
+    
+    def get_connection_by_id(self, connection_id):
+        """Get a connection by ID."""
+        return self.connections.get(connection_id)
+    
+    def get_connections_for_device(self, device):
+        """Get all connections for a device."""
+        return [conn for conn in self.connections.values() 
+                if conn.source_device == device or conn.target_device == device]
+    
+    def to_dict(self):
+        """Convert all connections to dictionary for serialization."""
+        connections_data = []
+        
+        for connection in self.connections.values():
+            # Only include valid connections
+            if connection.source_device and connection.target_device:
+                connections_data.append({
+                    "id": connection.id,
+                    "source_device_id": connection.source_device.id,
+                    "source_port_name": connection.source_port["name"],
+                    "target_device_id": connection.target_device.id,
+                    "target_port_name": connection.target_port["name"],
+                    "connection_type": connection.connection_type
+                })
+        
+        return connections_data
+    
+    def from_dict(self, connections_data, device_manager):
+        """Create connections from dictionary (deserialization)."""
+        for conn_data in connections_data:
+            try:
+                # Get devices
+                source_device = device_manager.get_device_by_id(conn_data["source_device_id"])
+                target_device = device_manager.get_device_by_id(conn_data["target_device_id"])
+                
+                if not source_device or not target_device:
+                    print(f"Cannot create connection: Device not found")
+                    continue
+                
+                # Find ports
+                source_port = next((p for p in source_device.ports 
+                                   if p["name"] == conn_data["source_port_name"]), None)
+                                   
+                target_port = next((p for p in target_device.ports 
+                                   if p["name"] == conn_data["target_port_name"]), None)
+                
+                if not source_port or not target_port:
+                    print(f"Cannot create connection: Port not found")
+                    continue
+                
+                # Create connection
+                connection_type = conn_data.get("connection_type", "ethernet")
+                connection = self.create_connection(
+                    source_device,
+                    source_port,
+                    target_device,
+                    target_port,
+                    connection_type
+                )
+                
+                # Set ID if provided
+                if connection and "id" in conn_data:
+                    connection.id = conn_data["id"]
+                    
+            except Exception as e:
+                print(f"Error creating connection from data: {e}")
+                import traceback
+                traceback.print_exc()
+    
+    def clear_all_connections(self):
+        """Remove all connections."""
+        connection_ids = list(self.connections.keys())
+        
+        for connection_id in connection_ids:
+            self.remove_connection(connection_id)
+        
+        return len(connection_ids)
+    
+    def handle_mouse_press(self, event):
+        """Handle mouse press for connection creation."""
+        try:
+            # Get scene position
+            pos = event.scenePos()
+            
+            # Get item at position
+            if self.scene:
+                item = self.scene.itemAt(pos, self.scene.views()[0].transform())
+                
+                # Check if we clicked on a Device
+                if isinstance(item, Device):
+                    # If we already have a source device, check if it's different
+                    if self.source_device and self.source_device != item:
+                        # Complete connection between source and target
+                        self.create_connection(self.source_device, item)
+                        
+                        # Reset state
+                        self.clear_temp_connection()
+                        
+                    else:
+                        # Start new connection from this device
+                        self.source_device = item
+                        
+                        # Find closest port
+                        self.source_port, _ = item.get_closest_port(pos)
+                        if not self.source_port:
+                            print("No suitable port found on source device")
+                            return
+                        
+                        # Get port position
+                        source_port_pos = item.get_port_position(self.source_port['name'])
+                        
+                        # Create temporary line
+                        self.temp_line = QGraphicsLineItem(source_port_pos.x(), source_port_pos.y(), 
+                                                         pos.x(), pos.y())
+                        self.temp_line.setPen(QPen(QColor(0, 100, 200), 2, Qt.DashLine))
+                        self.scene.addItem(self.temp_line)
+                        
+                        # Show port indicators on all devices to help with targeting
+                        self.show_port_indicators()
+                        
+                        print(f"Starting connection from {item.name}, port {self.source_port['name']}")
+                
+        except Exception as e:
+            print(f"Error in connection mouse press: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def handle_mouse_move(self, event):
+        """Update temporary connection line during move."""
+        try:
+            if self.source_device and self.temp_line and self.source_port:
+                # Get current mouse position
+                pos = event.scenePos()
+                
+                # Get port position
+                source_port_pos = self.source_device.get_port_position(self.source_port['name'])
+                
+                # Update line
+                self.temp_line.setLine(source_port_pos.x(), source_port_pos.y(), pos.x(), pos.y())
+                
+        except Exception as e:
+            print(f"Error in connection mouse move: {e}")
+    
+    def handle_mouse_release(self, event):
+        """Complete connection on mouse release."""
+        try:
+            if self.source_device and self.temp_line:
+                pos = event.scenePos()
+                
+                # Get item at release position
+                if self.scene:
+                    item = self.scene.itemAt(pos, self.scene.views()[0].transform())
+                    
+                    # Check if released on a different device
+                    if isinstance(item, Device) and item != self.source_device:
+                        # Create connection between devices
+                        self.create_connection(self.source_device, item)
+                    
+                    # Clean up
+                    self.clear_temp_connection()
+                    
+        except Exception as e:
+            print(f"Error in connection mouse release: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def create_connection(self, source_device, target_device):
+        """Create a connection between two devices."""
+        try:
+            if not isinstance(source_device, Device) or not isinstance(target_device, Device):
+                print("Both items must be devices to create a connection")
+                return None
+            
+            # Don't connect a device to itself
+            if source_device == target_device:
+                print("Cannot connect a device to itself")
+                return None
+            
+            # Get source port (should already be set from mouse press)
+            source_port = self.source_port
+            
+            # Find a suitable port on the target device
+            target_pos = target_device.scenePos()
+            target_port, _ = target_device.get_closest_port(target_pos)
+            
+            if not source_port or not target_port:
+                print("Failed to find suitable ports for connection")
+                return None
+            
+            # Mark ports as connected
+            source_port['connected'] = True
+            target_port['connected'] = True
+            
+            # Create connection
+            connection = Connection(source_device, source_port, target_device, target_port)
+            
+            # Add to scene
+            if self.scene:
+                self.scene.addItem(connection)
+                
+            # Store connection
+            self.connections[connection.id] = connection
+            
+            # Update devices
+            source_device.add_connection(connection)
+            target_device.add_connection(connection)
+            
+            # Emit signal
+            self.connection_created.emit(connection)
+            
+            print(f"Created connection between {source_device.name}:{source_port['name']} and {target_device.name}:{target_port['name']}")
+            
+            return connection
+            
+        except Exception as e:
+            print(f"Error creating connection: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def remove_connection(self, connection_id):
+        """Remove a connection by ID."""
+        try:
+            if connection_id in self.connections:
+                connection = self.connections[connection_id]
+                
+                # Mark ports as disconnected
+                if connection.source_port:
+                    connection.source_port['connected'] = False
+                
+                if connection.target_port:
+                    connection.target_port['connected'] = False
+                
+                # Update devices
+                if connection.source_device:
+                    connection.source_device.remove_connection(connection)
+                
+                if connection.target_device:
+                    connection.target_device.remove_connection(connection)
+                
+                # Remove from scene
+                if self.scene:
+                    self.scene.removeItem(connection)
+                
+                # Clean up the connection
+                connection.cleanup()
+                
+                # Remove from dictionary
+                del self.connections[connection_id]
+                
+                # Emit signal
+                self.connection_removed.emit(connection)
+                
+                print(f"Removed connection: {connection_id}")
+                return True
+            
+            print(f"Connection not found: {connection_id}")
+            return False
+            
+        except Exception as e:
+            print(f"Error removing connection: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def clear_temp_connection(self):
+        """Clear temporary connection elements."""
+        try:
+            # Remove temporary line
+            if self.temp_line and self.scene:
+                self.scene.removeItem(self.temp_line)
+                self.temp_line = None
+            
+            # Clear source device/port
+            self.source_device = None
+            self.source_port = None
+            
+            # Remove port indicators
+            self.clear_port_indicators()
+            
+        except Exception as e:
+            print(f"Error clearing temporary connection: {e}")
+    
+    def show_port_indicators(self):
+        """Show visual indicators for all device ports."""
+        try:
+            if not self.scene:
+                return
+                
+            # Remove any existing indicators
+            self.clear_port_indicators()
+            
+            # Create indicators for all devices in the scene
+            for item in self.scene.items():
+                if isinstance(item, Device):
+                    # Don't show indicators for the source device
+                    if item == self.source_device:
+                        continue
+                        
+                    # Add indicators for each port
+                    for port in item.ports:
+                        if not port.get('connected', False):  # Only show unconnected ports
+                            pos = item.get_port_position(port['name'])
+                            indicator = QGraphicsEllipseItem(pos.x() - 4, pos.y() - 4, 8, 8)
+                            indicator.setPen(QPen(Qt.black, 1))
+                            indicator.setBrush(QBrush(QColor(100, 200, 100)))
+                            self.scene.addItem(indicator)
+                            self.port_indicators.append(indicator)
+                            
+        except Exception as e:
+            print(f"Error showing port indicators: {e}")
+    
+    def clear_port_indicators(self):
+        """Remove all port indicators."""
+        try:
+            if self.scene:
+                for indicator in self.port_indicators:
+                    self.scene.removeItem(indicator)
+            self.port_indicators = []
+            
+        except Exception as e:
+            print(f"Error clearing port indicators: {e}")
+    
+    def get_connections_for_device(self, device_id):
+        """Get all connections for a specific device."""
+        return [c for c in self.connections.values() 
+                if (c.source_device and c.source_device.id == device_id) or 
+                   (c.target_device and c.target_device.id == device_id)]
+    
+    def can_connect(self, source_item, target_item):
+        """Check if two items can be connected."""
+        # Only connect Device instances
+        if not isinstance(source_item, Device) or not isinstance(target_item, Device):
+            return False
+        
+        # Don't connect to self
+        if source_item == target_item:
+            return False
+            
+        return True
+    
+    def handle_mouse_press(self, event):
+        """Handle mouse press for connection creation."""
+        try:
+            pos = event.scenePos()
+            item = self.scene.itemAt(pos, self.scene.views()[0].transform())
+            
+            # Check if clicked on a device
+            if isinstance(item, Device):
+                # Start connection from this device
+                self.source_device = item
+                
+                # Get closest port
+                port, _ = item.get_closest_port(pos)
+                port_pos = item.get_port_position(port['name'])
+                
+                # Create temporary line for visual feedback
+                self.temp_line = QGraphicsLineItem(port_pos.x(), port_pos.y(), pos.x(), pos.y())
+                self.temp_line.setPen(QPen(QColor(0, 0, 200, 200), 2))
+                self.scene.addItem(self.temp_line)
+                
+                print(f"Starting connection from {item.name}, port {port['name']}")
+            
+        except Exception as e:
+            print(f"Error in connection mouse press: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def handle_mouse_move(self, event):
+        """Handle mouse move for connection creation."""
+        if self.source_device and self.temp_line:
+            try:
+                # Update temporary line endpoint
+                pos = event.scenePos()
+                line = self.temp_line.line()
+                self.temp_line.setLine(line.x1(), line.y1(), pos.x(), pos.y())
+            except Exception as e:
+                print(f"Error in connection mouse move: {e}")
+    
+    def handle_mouse_release(self, event):
+        """Handle mouse release for connection creation."""
+        if self.source_device:
+            try:
+                pos = event.scenePos()
+                item = self.scene.itemAt(pos, self.scene.views()[0].transform())
+                
+                # Check if released on a device
+                if isinstance(item, Device) and item != self.source_device:
+                    # Create connection between devices
+                    self.create_connection(self.source_device, item)
+                
+                # Clean up
+                if self.temp_line:
+                    self.scene.removeItem(self.temp_line)
+                    self.temp_line = None
+                
+                self.source_device = None
+                
+            except Exception as e:
+                print(f"Error in connection mouse release: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                # Clean up on error
+                if self.temp_line:
+                    self.scene.removeItem(self.temp_line)
+                    self.temp_line = None
+                self.source_device = None
     
     def create_connection(self, source_device, target_device, conn_type="standard"):
         """Create a connection between devices."""
@@ -332,3 +1001,15 @@ class ConnectionManager(QObject):
             self.ports[port_id] = port
         
         # Create bottom, left, right ports similarly...
+    
+    def can_connect(self, source_item, target_item):
+        """Check if two items can be connected."""
+        # Only connect Device instances
+        if not isinstance(source_item, Device) or not isinstance(target_item, Device):
+            return False
+        
+        # Don't connect to self
+        if source_item == target_item:
+            return False
+            
+        return True

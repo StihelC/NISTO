@@ -1,1 +1,0 @@
-"""Specialized device models package."""

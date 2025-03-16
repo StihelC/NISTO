@@ -1,0 +1,22 @@
+2025-03-14 09:47:50,241 - nisto - INFO - Starting Network Topology Designer
+2025-03-14 09:47:50,667 - nisto - DEBUG - MainWindow: initializing
+2025-03-14 09:47:50,668 - nisto - DEBUG - BoundaryController initialized
+2025-03-14 09:47:50,669 - nisto - DEBUG - TopologyScene initialized
+2025-03-14 09:47:50,669 - nisto - DEBUG - Graphics view scene set to: <views.topology_scene.TopologyScene object at 0x746fc19c0d40>
+2025-03-14 09:47:50,670 - nisto - DEBUG - BoundaryController: setting scene <views.topology_scene.TopologyScene object at 0x746fc19c0d40> and view <PyQt5.QtWidgets.QGraphicsView object at 0x746fc19c0b90>
+2025-03-14 09:47:50,670 - nisto - DEBUG - Scene signals connected
+2025-03-14 09:47:50,671 - nisto - DEBUG - TopologyScene initialized
+2025-03-14 09:47:50,692 - nisto - DEBUG - MainWindow: setting up toolbar
+2025-03-14 09:47:50,695 - nisto - DEBUG - MainWindow: toolbar setup complete
+2025-03-14 09:47:50,775 - nisto - ERROR - Unhandled exception in main
+Traceback (most recent call last):
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/main.py", line 61, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/main.py", line 52, in main
+    main_window = MainWindow()
+                  ^^^^^^^^^^^^
+  File "/home/cam/Desktop/NISTO/network-topology-designer/src/controllers/main_window.py", line 134, in __init__
+    self.boundary_controller = BoundaryController(self.scene, self.graphics_view)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: BoundaryController.__init__() takes from 1 to 2 positional arguments but 3 were given

@@ -2,27 +2,62 @@ from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsItem, QGraph
 from PyQt5.QtCore import Qt, QPointF, QObject, QTimer, QRectF, QSizeF, pyqtSignal
 from PyQt5.QtGui import QPen, QBrush, QColor, QPainter, QFont
 from controllers.device_manager import DeviceManager
-from models.network_device import NetworkDevice
+from models.device import Device
 from src.models.connection import Connection
 from ui.device_dialog import DeviceSelectionDialog
 from controllers.connection_manager import ConnectionManager
 from src.controllers.connection_tool import ConnectionCreationTool
-
-class TopologyScene(QGraphicsScene):
-    def __init__(self):
-        super().__init__()
-        self.setSceneRect(-2000, -2000, 4000, 4000)
-        self.setBackgroundBrush(QColor(255, 255, 255))
-    
-    def drawBackground(self, painter, rect):
-        """Override to draw a plain background instead of a grid."""
-        # Just call the parent method which will fill with the background brush
-        super().drawBackground(painter, rect)
-        
-        # No additional grid drawing code
+from src.views.topology_scene import TopologyScene
 
 class CanvasController(QObject):
-    """Controller for managing canvas operations."""
+    """Controls the canvas and handles drawing operations."""
+    
+    mode_changed = pyqtSignal(str)
+    
+    # Mode constants
+    SELECT_MODE = "select_mode"
+    DEVICE_MODE = "device_mode"
+    CONNECTION_MODE = "connection_mode"
+    BOUNDARY_MODE = "boundary_mode"
+    
+    def __init__(self, device_manager):
+        super().__init__()
+        self.device_manager = device_manager
+        self.mode = self.SELECT_MODE
+        self.selected_device_type = Device.ROUTER  # Default device type
+    
+    def set_mode(self, mode):
+        """Set the current operation mode."""
+        if mode in [self.SELECT_MODE, self.DEVICE_MODE, self.CONNECTION_MODE, self.BOUNDARY_MODE]:
+            self.mode = mode
+            self.mode_changed.emit(mode)
+            print(f"Canvas mode set to: {mode}")
+            return True
+        
+        print(f"Invalid mode: {mode}")
+        return False
+    
+    def set_device_type(self, device_type):
+        """Set the device type for device creation."""
+        if device_type in Device.get_available_types():
+            self.selected_device_type = device_type
+            self.device_manager.set_selected_device_type(device_type)
+            print(f"Selected device type: {device_type}")
+            return True
+        
+        print(f"Unknown device type: {device_type}")
+        return False
+    
+    def handle_mouse_press(self, event):
+        """Handle mouse press events based on current mode."""
+        if self.mode == self.DEVICE_MODE:
+            # Create a device at the click location
+            pos = event.scenePos()
+            self.device_manager.create_device(
+                self.selected_device_type,
+                pos.x(),
+                pos.y()
+            )
     
     def __init__(self, main_window=None, view=None):
         """Initialize canvas controller.
@@ -239,9 +274,9 @@ class CanvasController(QObject):
                 # Find if we're clicking on a device
                 device = None
                 
-                if isinstance(item, NetworkDevice):
+                if isinstance(item, Device):
                     device = item
-                elif hasattr(item, 'parentItem') and isinstance(item.parentItem(), NetworkDevice):
+                elif hasattr(item, 'parentItem') and isinstance(item.parentItem(), Device):
                     device = item.parentItem()
                     
                 if device:
@@ -283,9 +318,9 @@ class CanvasController(QObject):
                 target_device = None
                 
                 # Find if we're releasing over a device
-                if isinstance(item_at_release, NetworkDevice):
+                if isinstance(item_at_release, Device):
                     target_device = item_at_release
-                elif hasattr(item_at_release, 'parentItem') and isinstance(item_at_release.parentItem(), NetworkDevice):
+                elif hasattr(item_at_release, 'parentItem') and isinstance(item_at_release.parentItem(), Device):
                     target_device = item_at_release.parentItem()
                 
                 # Create connection if we have valid source and target
@@ -971,3 +1006,15 @@ class CanvasController(QObject):
             self.grid_items.append(line)
         
         self.grid_visible = True
+
+    def handle_scene_mouse_press(self, event):
+        """Handle mouse press events on the scene."""
+        if self.mode == "device_mode":
+            # Create a device at the click location
+            pos = event.scenePos()
+            device = self.device_manager.create_device(
+                self.selected_device_type,
+                pos.x(), 
+                pos.y()
+            )
+            print(f"Created device: {device.id} at ({pos.x()}, {pos.y()})")

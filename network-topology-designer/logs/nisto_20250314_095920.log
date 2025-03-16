@@ -1,0 +1,5 @@
+2025-03-14 09:59:20,959 - nisto - INFO - Starting Network Topology Designer
+2025-03-14 09:59:21,343 - nisto - DEBUG - MainWindow: initializing
+2025-03-14 09:59:21,345 - nisto - DEBUG - BoundaryController initialized
+2025-03-14 09:59:21,345 - nisto - DEBUG - TopologyScene initialized
+2025-03-14 09:59:21,346 - nisto - DEBUG - Graphics view scene set to: <views.topology_scene.TopologyScene object at 0x75302deb8d40>

@@ -1,228 +1,244 @@
 from controllers.file_dialog_manager import FileDialogManager
 from controllers.topology_serializer import TopologySerializer
 from controllers.topology_exporter import TopologyExporter
-from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
-from PyQt5.QtGui import QFont, QColor, QPen, QBrush
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsTextItem, QFileDialog, QMessageBox
+from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QImage, QPainter
+from PyQt5.QtCore import Qt, QObject, QPointF
+import json
+import os
 
-class FileManager:
-    """Coordinates file operations for the network topology application."""
+class FileManager(QObject):
+    """Manages saving and loading topology files."""
     
-    def __init__(self, main_window, scene, device_manager, connection_manager):
+    def __init__(self, main_window):
         """Initialize the file manager."""
+        super().__init__()
         self.main_window = main_window
-        self.scene = scene
-        self.device_manager = device_manager
-        self.connection_manager = connection_manager
-        
-        # Initialize component managers
-        self.dialog_manager = FileDialogManager(main_window.view)
-        self.serializer = TopologySerializer()
-        self.exporter = TopologyExporter(scene)
+        self.device_manager = None
+        self.connection_manager = None
+        self.last_saved_file = None
     
-    def save_topology(self, force_dialog=False):
+    def save_topology(self):
         """Save the current topology to a file."""
-        # Get file path
-        file_path, success = self.dialog_manager.get_save_path(
-            title="Save Topology",
-            file_filter="Network Topology Files (*.ntf);;All Files (*)",
-            extension=".ntf",
-            force_dialog=force_dialog
-        )
+        try:
+            if not self.last_saved_file:
+                return self.save_topology_as()
+                
+            # Save to the last used file
+            return self._save_to_file(self.last_saved_file)
         
-        if not success:
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Error Saving", f"Could not save topology: {str(e)}")
+            return False
+    
+    def save_topology_as(self):
+        """Save the current topology to a new file."""
+        try:
+            # Get file path from user
+            file_path, _ = QFileDialog.getSaveFileName(
+                self.main_window,
+                "Save Topology",
+                "",
+                "Network Topology Files (*.ntd);;All Files (*)"
+            )
+            
+            if not file_path:
+                return False  # User canceled
+            
+            # Add extension if not present
+            if not file_path.endswith('.ntd'):
+                file_path += '.ntd'
+            
+            # Save to the selected file
+            success = self._save_to_file(file_path)
+            
+            if success:
+                self.last_saved_file = file_path
+            
+            return success
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Error Saving", f"Could not save topology: {str(e)}")
+            return False
+    
+    def _save_to_file(self, file_path):
+        """Save topology data to the specified file."""
+        if not self.device_manager or not hasattr(self.main_window, 'scene'):
+            QMessageBox.warning(self.main_window, "Warning", "No data to save.")
             return False
         
-        # Serialize topology
-        topology_data = self.serializer.serialize_topology(
-            self.scene,
-            self.device_manager,
-            self.connection_manager
-        )
+        # Prepare data structure
+        topology_data = {
+            'version': '1.0',
+            'devices': [],
+            'connections': [],
+            'boundaries': []
+        }
         
-        # Save to file
-        success, error = self.serializer.save_topology_to_file(file_path, topology_data)
+        # Export devices
+        for device_id, device in self.device_manager.devices.items():
+            device_data = {
+                'id': device.id,
+                'type': device.device_type,
+                'name': device.name,
+                'x': device.pos().x(),
+                'y': device.pos().y(),
+                'properties': device.properties
+            }
+            topology_data['devices'].append(device_data)
         
-        if success:
-            self.main_window.statusBar().showMessage(f"Topology saved to {file_path}", 5000)
-            return True
-        else:
-            print(f"Error saving topology: {error}")
-            import traceback
-            traceback.print_exc()
-            self.main_window.statusBar().showMessage(f"Error saving topology: {error}", 5000)
-            return False
+        # Export connections if available
+        if self.connection_manager and hasattr(self.connection_manager, 'connections'):
+            for connection_id, connection in self.connection_manager.connections.items():
+                conn_data = {
+                    'id': connection_id,
+                    'source_device_id': connection.source_device.id if connection.source_device else None,
+                    'target_device_id': connection.target_device.id if connection.target_device else None,
+                    'type': connection.connection_type,
+                    'properties': {}
+                }
+                
+                # Add properties if available
+                if hasattr(connection, 'properties'):
+                    conn_data['properties'] = connection.properties
+                
+                topology_data['connections'].append(conn_data)
+        
+        # Save to file as JSON
+        with open(file_path, 'w') as f:
+            json.dump(topology_data, f, indent=2)
+        
+        self.main_window.statusBar().showMessage(f"Topology saved to {file_path}", 3000)
+        return True
     
     def load_topology(self):
         """Load a topology from a file."""
-        # Get file path
-        file_path, success = self.dialog_manager.get_open_path(
-            title="Load Topology",
-            file_filter="Network Topology Files (*.ntf);;All Files (*)"
-        )
-        
-        if not success:
-            return False
-        
-        # Load from file
-        topology_data, error = self.serializer.load_topology_from_file(file_path)
-        
-        if topology_data is None:
-            self.main_window.statusBar().showMessage(f"Error loading topology: {error}", 5000)
-            return False
-        
-        # Clear current scene
-        self.scene.clear()
-        
-        # Dictionary to store created devices for connection references
-        created_devices = {}
-        
-        # Load devices
-        if 'devices' in topology_data:
+        try:
+            # Get file path from user
+            file_path, _ = QFileDialog.getOpenFileName(
+                self.main_window,
+                "Open Topology",
+                "",
+                "Network Topology Files (*.ntd);;All Files (*)"
+            )
+            
+            if not file_path:
+                return False  # User canceled
+            
+            # Clear current topology
+            self._clear_current_topology()
+            
+            # Load from file
+            with open(file_path, 'r') as f:
+                topology_data = json.load(f)
+            
+            # Process devices
+            device_map = {}  # Map old IDs to new device objects
+            
             for device_data in topology_data['devices']:
-                device_type = device_data.get('type', 'generic')
-                x = device_data.get('x', 0)
-                y = device_data.get('y', 0)
-                properties = device_data.get('properties', {})
-                
-                # Create device using device manager
-                device = self.device_manager.create_device(device_type, x, y)
+                # Create device
+                device = self.device_manager.create_device(
+                    device_data['type'],
+                    device_data['x'],
+                    device_data['y']
+                )
                 
                 if device:
-                    # Set properties
-                    device.properties = properties
+                    # Update properties
+                    for key, value in device_data['properties'].items():
+                        device.update_property(key, value)
                     
-                    # Store in dictionary for connections
-                    if 'id' in properties:
-                        created_devices[properties['id']] = device
-        
-        # Load connections
-        if 'connections' in topology_data:
-            for connection_data in topology_data['connections']:
-                source_id = connection_data.get('source_device_id')
-                target_id = connection_data.get('target_device_id')
+                    # Store in map for connections
+                    device_map[device_data['id']] = device
+            
+            # Process connections
+            for conn_data in topology_data.get('connections', []):
+                # Get devices by ID
+                source_device = device_map.get(conn_data['source_device_id'])
+                target_device = device_map.get(conn_data['target_device_id'])
                 
-                # Find the devices
-                source_device = created_devices.get(source_id)
-                target_device = created_devices.get(target_id)
-                
-                if source_device and target_device:
+                if source_device and target_device and self.connection_manager:
                     # Create connection
                     connection = self.connection_manager.create_connection(
-                        source_device, 
-                        target_device
+                        source_device,
+                        target_device,
+                        conn_data.get('type', 'standard')
                     )
                     
-                    if connection:
-                        # Set properties
-                        connection.properties = connection_data.get('properties', {})
-                        connection.connection_type = connection_data.get('connection_type', 'ethernet')
-                        connection.source_port = connection_data.get('source_port')
-                        connection.target_port = connection_data.get('target_port')
-                        
-                        # Update visual appearance
-                        connection.update_path()
+                    # Update properties if available
+                    if connection and 'properties' in conn_data:
+                        if hasattr(connection, 'properties'):
+                            for key, value in conn_data['properties'].items():
+                                connection.properties[key] = value
+            
+            # Update status
+            self.last_saved_file = file_path
+            self.main_window.statusBar().showMessage(f"Topology loaded from {file_path}", 3000)
+            
+            return True
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Error Loading", f"Could not load topology: {str(e)}")
+            return False
+    
+    def _clear_current_topology(self):
+        """Clear the current topology."""
+        # Clear connections
+        if self.connection_manager:
+            if hasattr(self.connection_manager, 'clear_all_connections'):
+                self.connection_manager.clear_all_connections()
         
-        # Load text boxes
-        if 'textboxes' in topology_data:
-            for text_data in topology_data['textboxes']:
-                x = text_data.get('x', 0)
-                y = text_data.get('y', 0)
-                text_content = text_data.get('text', '')
-                
-                # Create text item
-                text_item = QGraphicsTextItem(text_content)
-                text_item.setPos(x, y)
-                
-                if 'font' in text_data:
-                    font = QFont()
-                    font.fromString(text_data['font'])
-                    text_item.setFont(font)
-                
-                if 'color' in text_data:
-                    text_item.setDefaultTextColor(QColor(text_data['color']))
-                
-                self.scene.addItem(text_item)
-        
-        # Load boundaries
-        if 'boundaries' in topology_data:
-            for boundary_data in topology_data['boundaries']:
-                x = boundary_data.get('x', 0)
-                y = boundary_data.get('y', 0)
-                width = boundary_data.get('width', 100)
-                height = boundary_data.get('height', 100)
-                label = boundary_data.get('label', '')
-                
-                # Create boundary
-                rect_item = QGraphicsRectItem(0, 0, width, height)
-                rect_item.setPos(x, y)
-                
-                # Set appearance
-                pen_color = QColor(boundary_data.get('pen_color', '#000000'))
-                brush_color = QColor(boundary_data.get('brush_color', '#C8C8FF'))
-                
-                # Apply alpha if specified
-                alpha = boundary_data.get('brush_alpha', 50)
-                brush_color.setAlpha(alpha)
-                
-                rect_item.setPen(QPen(pen_color, 1, Qt.DashLine))
-                rect_item.setBrush(QBrush(brush_color))
-                
-                # Add label if specified
-                if label:
-                    text_item = QGraphicsTextItem(label)
-                    text_item.setPos(x, y - 20)
-                    self.scene.addItem(text_item)
-                
-                self.scene.addItem(rect_item)
-        
-        # Update status
-        self.main_window.statusBar().showMessage(f"Topology loaded from {file_path}", 5000)
-        return True
+        # Clear devices
+        if self.device_manager:
+            if hasattr(self.device_manager, 'clear_all_devices'):
+                self.device_manager.clear_all_devices()
+            else:
+                # Fallback if method doesn't exist
+                scene = self.main_window.scene
+                if scene:
+                    scene.clear()
     
     def export_as_png(self):
-        """Export the current view as a PNG image."""
-        # Get file path
-        file_path, success = self.dialog_manager.get_save_path(
-            title="Export as PNG",
-            file_filter="PNG Images (*.png);;All Files (*)",
-            extension=".png"
-        )
-        
-        if not success:
-            return False
-        
-        # Export to PNG
-        success, error = self.exporter.export_as_png(
-            file_path, 
-            background_color=Qt.white
-        )
-        
-        if success:
-            self.main_window.statusBar().showMessage(f"Topology exported to {file_path}", 5000)
+        """Export the current topology as PNG image."""
+        try:
+            # Get file path from user
+            file_path, _ = QFileDialog.getSaveFileName(
+                self.main_window,
+                "Export as PNG",
+                "",
+                "PNG Images (*.png);;All Files (*)"
+            )
+            
+            if not file_path:
+                return False  # User canceled
+            
+            # Add extension if not present
+            if not file_path.endswith('.png'):
+                file_path += '.png'
+            
+            # Get view and scene
+            view = self.main_window.graphics_view
+            scene = self.main_window.scene
+            
+            if not view or not scene:
+                QMessageBox.warning(self.main_window, "Warning", "No topology to export.")
+                return False
+            
+            # Create a image of the current scene
+            image = QImage(scene.sceneRect().size().toSize(), QImage.Format_ARGB32)
+            image.fill(0xFFFFFFFF)  # White background
+            
+            # Paint the scene onto the image
+            painter = QPainter(image)
+            scene.render(painter)
+            painter.end()
+            
+            # Save the image
+            image.save(file_path)
+            
+            self.main_window.statusBar().showMessage(f"Topology exported to {file_path}", 3000)
             return True
-        else:
-            self.main_window.statusBar().showMessage(f"Error exporting topology: {error}", 5000)
-            return False
-    
-    def export_as_svg(self):
-        """Export the current view as an SVG image."""
-        # Get file path
-        file_path, success = self.dialog_manager.get_save_path(
-            title="Export as SVG",
-            file_filter="SVG Images (*.svg);;All Files (*)",
-            extension=".svg"
-        )
-        
-        if not success:
-            return False
-        
-        # Export to SVG
-        success, error = self.exporter.export_as_svg(file_path)
-        
-        if success:
-            self.main_window.statusBar().showMessage(f"Topology exported to {file_path}", 5000)
-            return True
-        else:
-            self.main_window.statusBar().showMessage(f"Error exporting topology: {error}", 5000)
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Error Exporting", f"Could not export image: {str(e)}")
             return False
